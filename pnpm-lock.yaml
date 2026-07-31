@@ -24,11 +24,26 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.20.1)
 
+  packages/git:
+    devDependencies:
+      '@gitiviz/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+
   packages/schema:
     dependencies:
       ajv:
         specifier: ^8.17.0
         version: 8.20.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+
+  packages/test-fixtures:
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
