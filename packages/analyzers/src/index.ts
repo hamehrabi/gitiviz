@@ -8,3 +8,4 @@ export {
   type FactAnchor
 } from "./types.js";
 export { packageAnalyzer } from "./packageAnalyzer.js";
+export { importExportAnalyzer } from "./importExportAnalyzer.js";
