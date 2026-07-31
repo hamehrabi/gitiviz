@@ -319,6 +319,15 @@ function stylesheet(chapterCount: number): string {
       `color:#1f2937;background:#ffffff;line-height:1.6}`,
     `header,main{max-width:52rem;margin:0 auto;padding:0 1.25rem}`,
     `header{padding-top:2.5rem}`,
+    // Long repo-controlled tokens (paths, identifiers) must wrap so 320px
+    // never scrolls horizontally.
+    `h1,h2,h3,p,label,summary,figcaption{overflow-wrap:anywhere}`,
+    // Skip link: clipped off-screen but focusable; revealed on focus.
+    `.skip-link{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;` +
+      `clip:rect(0 0 0 0);clip-path:inset(50%)}`,
+    `.skip-link:focus{position:fixed;top:0.5rem;left:0.5rem;width:auto;height:auto;margin:0;` +
+      `overflow:visible;clip:auto;clip-path:none;background:#ffffff;color:#1d4ed8;` +
+      `padding:0.5rem 1rem;border:1px solid #1d4ed8;border-radius:4px}`,
     `h1{font-size:1.5rem;font-weight:600;margin:0 0 0.25rem}`,
     `h2{font-size:1.25rem;font-weight:600;margin:2rem 0 0.75rem}`,
     `h3{font-size:1rem;font-weight:600;margin:1.5rem 0 0.5rem}`,
@@ -330,7 +339,10 @@ function stylesheet(chapterCount: number): string {
     `ul,ol{margin:0.5rem 0;padding-left:1.5rem}`,
     `li{margin:0.25rem 0;overflow-wrap:anywhere}`,
     // Diagram-first: figures get room and dominate the chapter.
-    `figure.diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff}`,
+    // overflow-x:auto keeps an oversized diagram scrolling inside its own
+    // figure instead of widening the page at 320px.
+    `figure.diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;` +
+      `background:#ffffff;overflow-x:auto}`,
     `figure.diagram svg{display:block;max-width:100%;height:auto}`,
     `figure.diagram-placeholder{display:flex;align-items:center;justify-content:center;min-height:8rem;background:#f9fafb}`,
     `.caption{margin:1.5rem 0 0.5rem;font-size:1.0625rem}`,
@@ -403,11 +415,12 @@ export function renderChangeBook(
     `<style>${stylesheet(chapters.length)}</style>` +
     `</head>` +
     `<body>` +
+    `<a class="skip-link" href="#main">Skip to content</a>` +
     `<header><h1>${escHtml(change.repository.name)}</h1>` +
     `<p class="subtitle">${escHtml(shortRev(change.baseRevision))} → ${escHtml(
       shortRev(change.headRevision)
     )}</p></header>` +
-    `<main>` +
+    `<main id="main">` +
     inputs +
     nav +
     sections +
