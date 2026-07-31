@@ -8,6 +8,7 @@ export {
   type ChangeUnitsInput,
   type ChangeUnitsResult
 } from "./changeUnits.js";
+export { buildBookManifest } from "./book.js";
 export {
   applyNarration,
   buildNarrationRequest,
