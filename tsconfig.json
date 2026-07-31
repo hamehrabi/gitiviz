@@ -6,6 +6,7 @@
     { "path": "packages/git" },
     { "path": "packages/analyzers" },
     { "path": "packages/core" },
-    { "path": "packages/renderer" }
+    { "path": "packages/renderer" },
+    { "path": "packages/cli" }
   ]
 }

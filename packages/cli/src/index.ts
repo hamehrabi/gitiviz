@@ -1,0 +1,149 @@
+#!/usr/bin/env node
+/**
+ * gitiviz CLI — zero-dependency arg parsing + command dispatch.
+ *
+ *   gitiviz compare <base> <head> [--repo DIR] [--out DIR]
+ *   gitiviz branch [base]         [--repo DIR] [--out DIR]
+ *   gitiviz commit <sha>          [--repo DIR] [--out DIR]
+ *   gitiviz validate                          [--out DIR]
+ *   gitiviz apply-narration                   [--out DIR]
+ *
+ * --repo defaults to the current directory; --out defaults to
+ * <repo>/.gitiviz. All failures surface as one actionable stderr message and
+ * exit code 1 — command implementations throw, only this file exits.
+ * This module is also the esbuild entry for the bundled plugin script.
+ */
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  runApplyNarration,
+  runBranch,
+  runCommit,
+  runCompare,
+  runValidate
+} from "./commands/compare.js";
+
+export interface CliIo {
+  out(text: string): void;
+  err(text: string): void;
+}
+
+const USAGE = `Usage:
+  gitiviz compare <base> <head> [--repo DIR] [--out DIR]
+  gitiviz branch [base]         [--repo DIR] [--out DIR]
+  gitiviz commit <sha>          [--repo DIR] [--out DIR]
+  gitiviz validate                          [--out DIR]
+  gitiviz apply-narration                   [--out DIR]
+
+  --repo DIR   git repository to analyze (default: current directory)
+  --out DIR    output directory (default: <repo>/.gitiviz)`;
+
+interface ParsedArgs {
+  positionals: string[];
+  repo?: string;
+  out?: string;
+}
+
+/** Hand-rolled parser: two --flags with values, everything else positional. */
+export function parseArgs(argv: string[]): ParsedArgs {
+  const parsed: ParsedArgs = { positionals: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]!;
+    if (token === "--repo" || token === "--out") {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith("--")) {
+        throw new Error(`${token} needs a directory argument`);
+      }
+      if (token === "--repo") parsed.repo = value;
+      else parsed.out = value;
+    } else if (token.startsWith("--")) {
+      throw new Error(`unknown option "${token}"`);
+    } else {
+      parsed.positionals.push(token);
+    }
+  }
+  return parsed;
+}
+
+function expectArgs(
+  command: string,
+  rest: string[],
+  min: number,
+  max: number
+): void {
+  if (rest.length < min || rest.length > max) {
+    const expected =
+      min === max ? `${min}` : max === Number.MAX_SAFE_INTEGER ? `at least ${min}` : `${min}–${max}`;
+    throw new Error(
+      `"${command}" takes ${expected} argument${max === 1 ? "" : "s"}, got ${rest.length}`
+    );
+  }
+}
+
+const defaultIo: CliIo = {
+  out: (text) => process.stdout.write(`${text}\n`),
+  err: (text) => process.stderr.write(`${text}\n`)
+};
+
+/** Run the CLI; returns the process exit code instead of exiting. */
+export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<number> {
+  let parsed: ParsedArgs;
+  try {
+    parsed = parseArgs(argv);
+  } catch (error) {
+    io.err(`gitiviz: ${error instanceof Error ? error.message : String(error)}`);
+    io.err(USAGE);
+    return 1;
+  }
+
+  const [command, ...rest] = parsed.positionals;
+  const repoDir = resolve(parsed.repo ?? ".");
+  const outDir = resolve(parsed.out ?? join(repoDir, ".gitiviz"));
+
+  try {
+    switch (command) {
+      case "compare":
+        expectArgs("compare", rest, 2, 2);
+        await runCompare({ repoDir, outDir, baseRef: rest[0]!, headRef: rest[1]!, io });
+        return 0;
+      case "branch": {
+        expectArgs("branch", rest, 0, 1);
+        const options: Parameters<typeof runBranch>[0] = { repoDir, outDir, io };
+        if (rest[0] !== undefined) options.baseRef = rest[0];
+        await runBranch(options);
+        return 0;
+      }
+      case "commit":
+        expectArgs("commit", rest, 1, 1);
+        await runCommit({ repoDir, outDir, ref: rest[0]!, io });
+        return 0;
+      case "validate":
+        expectArgs("validate", rest, 0, 0);
+        await runValidate({ outDir, io });
+        return 0;
+      case "apply-narration":
+        expectArgs("apply-narration", rest, 0, 0);
+        await runApplyNarration({ outDir, io });
+        return 0;
+      case undefined:
+        io.err("gitiviz: no command given");
+        io.err(USAGE);
+        return 1;
+      default:
+        io.err(`gitiviz: unknown command "${command}"`);
+        io.err(USAGE);
+        return 1;
+    }
+  } catch (error) {
+    io.err(`gitiviz: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+}
+
+// Run when executed directly (node src/index.ts via tsx, or the bundled .mjs).
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  process.exitCode = await runCli(process.argv.slice(2));
+}
