@@ -147,6 +147,18 @@ validator makes it impossible for AI output to claim `derived`.
 3. Each change chapter: one sentence of human outcome; a small before→after
    diagram (5–12 entities, max 5 nodes horizontally, verb on every arrow);
    an explicit "what stayed unchanged" list.
+
+**Diagram-first requirement (user-mandated):** diagrams are the dominant
+content of every chapter, not illustrations of the text — words and code both
+carry the same cognitive load, so visuals must do the explaining. Notation is
+C4-inspired (familiar boxes-in-boundaries: context level for the systems
+chapter, container level for change chapters; simplified sequence lanes for
+flows) with Gitiviz's human-first labels and change language (+ new/dashed,
+~ changed/accent, − removed/faded, verb on every edge). Diagrams are compiled
+at build time from the canonical graph into static inline SVG — deterministic
+layout, fully escaped, no Mermaid runtime, no JavaScript — so the strict CSP
+and offline guarantees hold. Mermaid remains a possible future export
+adapter, never the reading surface.
 4. Collapsed at the bottom: "Technical evidence ▸" — files, symbols,
    line-anchored source links. Full component graph also collapsed by default.
 5. Works at 320px/736px/desktop, keyboard accessible, colour never the only
