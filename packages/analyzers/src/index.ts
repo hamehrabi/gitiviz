@@ -9,3 +9,4 @@ export {
 } from "./types.js";
 export { packageAnalyzer } from "./packageAnalyzer.js";
 export { importExportAnalyzer } from "./importExportAnalyzer.js";
+export { routeAnalyzer } from "./routeAnalyzer.js";
