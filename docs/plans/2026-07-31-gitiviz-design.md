@@ -149,8 +149,14 @@ validator makes it impossible for AI output to claim `derived`.
    an explicit "what stayed unchanged" list.
 4. Collapsed at the bottom: "Technical evidence ▸" — files, symbols,
    line-anchored source links. Full component graph also collapsed by default.
-5. Works at 320px/736px/desktop, keyboard accessible, light/dark schemes,
-   colour never the only carrier of meaning, zero runtime network requests.
+5. Works at 320px/736px/desktop, keyboard accessible, colour never the only
+   carrier of meaning, zero runtime network requests.
+6. **Visual style requirement (user-mandated):** clean, standard, low
+   cognitive load. Light theme is the default and the primary design target —
+   generous whitespace, system font stack, restrained neutral palette with one
+   accent. A dark scheme ships only if fully polished (via
+   `prefers-color-scheme`); a messy or auto-inverted dark output is worse than
+   none and must not ship.
 
 Visual change language (used consistently everywhere): `+` New (dashed
 boundary), `~` Changed (accent boundary), `−` Removed (faded/struck),
