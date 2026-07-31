@@ -208,6 +208,43 @@ Every release reuses the same schema; nothing is thrown away.
   via `/plugin marketplace add hamehrabi/gitiviz`.
 - Final product name to be confirmed before README is written.
 
+## Toolchain and runtime strategy (Docker-first)
+
+Constraint: the development machine has no Node/npm/pnpm and cannot install
+them; Docker is available and running.
+
+- **Development:** all tooling (pnpm, TypeScript, esbuild, vitest) runs inside
+  a `node:22` container with the repo volume-mounted. A `dev.sh` wrapper wraps
+  `docker run` so builds and tests are one command. Nothing is installed on
+  the host. CI (GitHub Actions) runs the same containerized build.
+- **Plugin runtime:** bundled scripts are committed as dependency-free
+  single-file `.mjs` artifacts (esbuild output) — end users never run
+  `npm install`. This matches observed convention: no installed plugin in the
+  wild ships `node_modules`. Git access is via shelling out to `git`
+  (carefully, never interpolating repo strings), not a bundled library.
+- **Node fallback:** the plugin's launcher probes for a working `node`; when
+  absent but Docker is available, it transparently runs the bundled script via
+  `docker run node:22-alpine` with the repo mounted. Missing both → clear
+  error with install instructions (per plugin-dev marketplace guidance).
+- **State separation:** generated output goes to the analyzed project's
+  `.gitiviz/` directory (or `${CLAUDE_PLUGIN_DATA}`), never into
+  `${CLAUDE_PLUGIN_ROOT}` (wiped on plugin update).
+
+## Plugin packaging decisions (from best-practice research)
+
+- Repo is simultaneously a Claude Code plugin, its own marketplace, and a
+  TypeScript workspace (pattern proven by obra/superpowers):
+  `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` with the
+  plugin entry `{"name": "gitiviz", "source": "./"}`.
+- Commands are markdown orchestrators; computation lives in bundled scripts
+  referenced via `${CLAUDE_PLUGIN_ROOT}` in both `allowed-tools` (pre-authorized,
+  no permission prompts) and the command body (ralph-wiggum pattern).
+- All runtime assets live under the plugin root — installs are cache copies;
+  `../` paths and out-of-repo symlinks silently break.
+- Omit `version` in plugin.json during active development (every commit
+  becomes an update); adopt explicit semver at stable release.
+- Dev loop without install: `claude --plugin-dir .`.
+
 ## Non-goals for v0.1
 
 Perfect multi-language support, dynamic call-graph analysis, hosted SaaS,
