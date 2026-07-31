@@ -1,0 +1,201 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gitiviz.dev/spec/change-manifest.schema.json",
+  "title": "Gitiviz Change Manifest",
+  "type": "object",
+  "required": [
+    "specVersion",
+    "repository",
+    "baseRevision",
+    "headRevision",
+    "entities",
+    "relationships",
+    "changeUnits",
+    "analysisLimitations"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "specVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "repository": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "baseRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "headRevision": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{40}|WORKTREE)$"
+    },
+    "entities": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/entity" }
+    },
+    "relationships": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/relationship" }
+    },
+    "changeUnits": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/changeUnit" }
+    },
+    "analysisLimitations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/analysisLimitation" }
+    }
+  },
+  "definitions": {
+    "provenance": {
+      "type": "string",
+      "enum": ["declared", "derived", "inferred", "unknown"]
+    },
+    "changeState": {
+      "type": "string",
+      "enum": ["added", "changed", "removed", "unchanged"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "sourceRange": {
+      "type": "object",
+      "required": ["startLine", "endLine"],
+      "additionalProperties": false,
+      "properties": {
+        "startLine": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "evidenceAnchor": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "baseBlob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "headBlob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "range": { "$ref": "#/definitions/sourceRange" },
+        "symbol": { "type": "string" },
+        "fingerprint": { "type": "string" }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "required": ["id", "kind", "humanLabel", "baseState", "headState", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "humanLabel": { "type": "string", "minLength": 1 },
+        "technicalLabel": { "type": "string" },
+        "baseState": { "$ref": "#/definitions/changeState" },
+        "headState": { "$ref": "#/definitions/changeState" },
+        "provenance": { "$ref": "#/definitions/provenance" },
+        "confidence": { "$ref": "#/definitions/confidence" },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/evidenceAnchor" }
+        }
+      },
+      "if": {
+        "properties": { "provenance": { "const": "inferred" } },
+        "required": ["provenance"]
+      },
+      "else": {
+        "not": { "required": ["confidence"] }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": ["id", "from", "to", "verb", "baseState", "headState", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "verb": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string" },
+        "baseState": { "$ref": "#/definitions/changeState" },
+        "headState": { "$ref": "#/definitions/changeState" },
+        "provenance": { "$ref": "#/definitions/provenance" },
+        "confidence": { "$ref": "#/definitions/confidence" },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/evidenceAnchor" }
+        }
+      },
+      "if": {
+        "properties": { "provenance": { "const": "inferred" } },
+        "required": ["provenance"]
+      },
+      "else": {
+        "not": { "required": ["confidence"] }
+      }
+    },
+    "changeUnit": {
+      "type": "object",
+      "required": ["id", "technicalTitle", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "technicalTitle": { "type": "string", "minLength": 1 },
+        "humanTitle": { "type": ["string", "null"] },
+        "type": { "type": "string" },
+        "commits": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        },
+        "entities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "relationships": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "grouped": { "type": "boolean" },
+        "groupedReason": { "type": "string" },
+        "summary": { "type": ["string", "null"] },
+        "beforeDescription": { "type": ["string", "null"] },
+        "afterDescription": { "type": ["string", "null"] },
+        "userImpact": { "type": ["string", "null"] },
+        "openQuestions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "provenance": { "$ref": "#/definitions/provenance" },
+        "confidence": { "$ref": "#/definitions/confidence" },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/evidenceAnchor" }
+        }
+      },
+      "if": {
+        "properties": { "provenance": { "const": "inferred" } },
+        "required": ["provenance"]
+      },
+      "else": {
+        "not": { "required": ["confidence"] }
+      }
+    },
+    "analysisLimitation": {
+      "type": "object",
+      "required": ["message"],
+      "additionalProperties": false,
+      "properties": {
+        "message": { "type": "string", "minLength": 1 },
+        "path": { "type": "string" },
+        "analyzer": { "type": "string" }
+      }
+    }
+  }
+}

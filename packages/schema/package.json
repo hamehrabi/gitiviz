@@ -4,5 +4,11 @@
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts"
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "ajv": "^8.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
 }
