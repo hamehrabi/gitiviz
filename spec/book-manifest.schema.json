@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gitiviz.dev/spec/book-manifest.schema.json",
+  "title": "Gitiviz Book Manifest",
+  "type": "object",
+  "required": ["specVersion", "repository", "chapters"],
+  "additionalProperties": false,
+  "properties": {
+    "specVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "repository": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "chapters": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": { "$ref": "#/definitions/chapter" },
+      "allOf": [
+        { "contains": { "type": "object", "properties": { "id": { "const": "purpose" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "journeys" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "systems" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "capabilities" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "flows" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "contracts" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "security" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "operations" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "decisions" } }, "required": ["id"] } },
+        { "contains": { "type": "object", "properties": { "id": { "const": "history" } }, "required": ["id"] } }
+      ]
+    }
+  },
+  "definitions": {
+    "chapterId": {
+      "type": "string",
+      "enum": [
+        "purpose",
+        "journeys",
+        "systems",
+        "capabilities",
+        "flows",
+        "contracts",
+        "security",
+        "operations",
+        "decisions",
+        "history"
+      ]
+    },
+    "chapterStatus": {
+      "type": "string",
+      "enum": ["generated", "curated", "not-written"]
+    },
+    "chapter": {
+      "type": "object",
+      "required": ["id", "title", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/chapterId" },
+        "title": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/definitions/chapterStatus" }
+      }
+    }
+  }
+}
