@@ -1,0 +1,10 @@
+{
+  "name": "gitiviz",
+  "description": "Turn any Git branch, commit, or range into a plain-language, evidence-backed, self-contained HTML change book.",
+  "author": {
+    "name": "Hamed Mehrabi",
+    "url": "https://github.com/hamehrabi"
+  },
+  "repository": "https://github.com/hamehrabi/gitiviz",
+  "license": "MIT"
+}

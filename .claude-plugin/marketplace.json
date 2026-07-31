@@ -1,0 +1,12 @@
+{
+  "name": "gitiviz",
+  "owner": {
+    "name": "Hamed Mehrabi"
+  },
+  "plugins": [
+    {
+      "name": "gitiviz",
+      "source": "./"
+    }
+  ]
+}
