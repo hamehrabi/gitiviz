@@ -1,0 +1,16 @@
+{
+  "name": "@gitiviz/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@gitiviz/analyzers": "workspace:*",
+    "@gitiviz/git": "workspace:*",
+    "@gitiviz/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

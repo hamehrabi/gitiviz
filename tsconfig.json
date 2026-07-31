@@ -4,6 +4,7 @@
     { "path": "packages/schema" },
     { "path": "packages/test-fixtures" },
     { "path": "packages/git" },
-    { "path": "packages/analyzers" }
+    { "path": "packages/analyzers" },
+    { "path": "packages/core" }
   ]
 }

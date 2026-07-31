@@ -30,6 +30,22 @@ importers:
         specifier: workspace:*
         version: link:../schema
 
+  packages/core:
+    dependencies:
+      '@gitiviz/analyzers':
+        specifier: workspace:*
+        version: link:../analyzers
+      '@gitiviz/git':
+        specifier: workspace:*
+        version: link:../git
+      '@gitiviz/schema':
+        specifier: workspace:*
+        version: link:../schema
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+
   packages/git:
     devDependencies:
       '@gitiviz/test-fixtures':
