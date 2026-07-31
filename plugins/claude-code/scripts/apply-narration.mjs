@@ -8394,6 +8394,251 @@ function compileDiagram(request) {
   return changeDiagram(request.entities, request.relationships, request.changeUnit);
 }
 
+// packages/renderer/src/sidebar.ts
+var sidebarCss = [
+  /* --- sidebar (sb-) — sticky left column, collapses under 736px --- */
+  `.sb-nav{position:sticky;top:0;align-self:flex-start;box-sizing:border-box;flex:0 0 auto;width:13.5rem;max-height:100vh;overflow-y:auto;padding:1.5rem 0.875rem 1.5rem 1rem;background:#ffffff;border-right:1px solid #e5e7eb}`,
+  `.sb-wordmark{margin:0 0 1.5rem;padding:0 0.625rem;font-size:0.9375rem;font-weight:700;letter-spacing:0.01em;color:#111827;line-height:1.3;overflow-wrap:anywhere}`,
+  /* quiet accent tick under the wordmark — the sidebar's one flourish */
+  `.sb-wordmark::after{content:"";display:block;width:1.75rem;height:3px;margin-top:0.5rem;border-radius:2px;background:#1d4ed8}`,
+  `.sb-tabs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.125rem}`,
+  `.sb-item{margin:0}`,
+  `.sb-tab{display:block;padding:0.4375rem 0.625rem;border-radius:6px;border-left:3px solid transparent;color:#4b5563;font-size:0.875rem;line-height:1.4;text-decoration:none}`,
+  `.sb-tab:hover{color:#1f2937;background:#f3f4f6}`,
+  `.sb-tab:focus-visible{outline:2px solid #1d4ed8;outline-offset:2px}`,
+  `.sb-item-active .sb-tab{color:#1d4ed8;background:#eff6ff;border-left-color:#1d4ed8;font-weight:600}`,
+  /* --- collapsed form: sticky top row, tabs scroll horizontally --- */
+  `@media (max-width:736px){.sb-nav{display:flex;align-items:center;gap:0.75rem;width:auto;max-height:none;overflow-y:visible;z-index:10;padding:0.5rem 0.75rem;border-right:none;border-bottom:1px solid #e5e7eb}.sb-wordmark{flex:0 0 auto;margin:0;padding:0;font-size:0.875rem;max-width:7.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sb-wordmark::after{display:none}.sb-tabs{flex:1 1 auto;flex-direction:row;gap:0.25rem;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}.sb-tab{border-left:none;white-space:nowrap}}`
+].join("\n");
+function renderSidebar(views, activeId, repoName) {
+  const wordmark = repoName === void 0 ? "" : `<p class="sb-wordmark">${escHtml(repoName)}</p>`;
+  const tabs = views.map((view) => {
+    const active = view.id === activeId;
+    return `<li class="sb-item${active ? " sb-item-active" : ""}"><a class="sb-tab" href="${escAttr(view.href)}"${active ? ` aria-current="page"` : ""}>${escHtml(view.label)}</a></li>`;
+  }).join("");
+  return `<nav class="sb-nav" aria-label="Views">` + wordmark + `<ul class="sb-tabs">${tabs}</ul></nav>`;
+}
+
+// packages/renderer/src/cards.ts
+var TYPE_LABELS = {
+  feature: "Feature",
+  fix: "Fix",
+  docs: "Docs",
+  test: "Test",
+  housekeeping: "Housekeeping"
+};
+var ALL_TYPES = Object.keys(TYPE_LABELS);
+var TYPE_TINTS = {
+  feature: { text: "#1d4ed8", bg: "#eff6ff", border: "#bfdbfe" },
+  fix: { text: "#b45309", bg: "#fffbeb", border: "#fde68a" },
+  docs: { text: "#6d28d9", bg: "#f5f3ff", border: "#ddd6fe" },
+  test: { text: "#047857", bg: "#ecfdf5", border: "#a7f3d0" },
+  housekeeping: { text: "#4b5563", bg: "#f3f4f6", border: "#e5e7eb" }
+};
+var INFERRED_MARK = `<span class="prov" title="AI interpretation: narrated title, not a derived fact">\u25C7</span>`;
+var ACTIVE_CHIP = `color:#1d4ed8;border-color:#1d4ed8;background:#eff6ff;font-weight:600`;
+var FOCUS_RING = `outline:2px solid #1d4ed8;outline-offset:2px`;
+var chipStateRules = ["all", ...ALL_TYPES].map(
+  (id) => `#cd-filter-${id}:checked~.cd-filters .cd-chip[for="cd-filter-${id}"]{${ACTIVE_CHIP}}
+#cd-filter-${id}:focus-visible~.cd-filters .cd-chip[for="cd-filter-${id}"]{${FOCUS_RING}}`
+).join("\n");
+var cardHideRules = ALL_TYPES.map(
+  (type) => `#cd-filter-${type}:checked~.cd-grid .cd-card:not(.cd-type-${type}){display:none}`
+).join("\n");
+var tagTintRules = ALL_TYPES.map((type) => {
+  const tint = TYPE_TINTS[type];
+  return `.cd-tag-${type}{color:${tint.text};background:${tint.bg};border-color:${tint.border}}`;
+}).join("\n");
+var cardsCss = `
+/* --- home cards + filter chips (cd-) --- */
+/* Radios: visually hidden, still focusable (never display:none). */
+.cd-filter-input{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%)}
+.cd-filters{display:flex;flex-wrap:wrap;gap:0.375rem;margin:0 0 1.25rem}
+.cd-chip{cursor:pointer;color:#4b5563;font-size:0.8125rem;line-height:1.5;padding:0.25rem 0.75rem;border:1px solid #e5e7eb;border-radius:999px;background:#ffffff}
+.cd-chip:hover{color:#1f2937;border-color:#d1d5db;background:#f9fafb}
+${chipStateRules}
+${cardHideRules}
+/* Cards grid: auto-fill columns; a single column falls out naturally at 320px. */
+.cd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem}
+.cd-card{display:flex;flex-direction:column;gap:0.375rem;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:1rem;color:inherit;text-decoration:none;transition:border-color 120ms ease,box-shadow 120ms ease}
+.cd-card:hover{border-color:#d1d5db;box-shadow:0 2px 8px rgba(17,24,39,0.08)}
+.cd-meta{display:flex;align-items:center;gap:0.5rem;margin:0}
+.cd-tag{font-size:0.6875rem;font-weight:600;line-height:1.7;padding:0 0.5rem;border-radius:999px;border:1px solid transparent}
+${tagTintRules}
+code.cd-sha{background:transparent;border:none;padding:0;color:#9ca3af;font-size:0.75rem}
+/* Reset the base h3 (uppercase micro-heading) back to a card headline. */
+.cd-title{font-size:0.9375rem;font-weight:600;letter-spacing:0;text-transform:none;color:#1f2937;margin:0}
+.cd-summary{font-size:0.8125rem;color:#6b7280;margin:0}
+.cd-chapters{display:flex;flex-wrap:wrap;gap:0.25rem;margin:auto 0 0;padding-top:0.375rem}
+.cd-chapter{font-size:0.6875rem;line-height:1.7;color:#6b7280;border:1px solid #e5e7eb;border-radius:999px;padding:0 0.5rem}
+.cd-arrow{margin-left:auto;color:#9ca3af;transition:transform 120ms ease,color 120ms ease}
+.cd-card:hover .cd-arrow{color:#1d4ed8;transform:translateX(2px)}
+@media (prefers-reduced-motion:reduce){
+.cd-card,.cd-arrow{transition:none}
+.cd-card:hover .cd-arrow{transform:none}
+}
+`;
+function renderFilterChips(types) {
+  const inputs = [
+    `<input type="radio" name="cd-filter" id="cd-filter-all" class="cd-filter-input" checked>`,
+    ...types.map(
+      (type) => `<input type="radio" name="cd-filter" id="cd-filter-${type}" class="cd-filter-input">`
+    )
+  ].join("");
+  const chips = [
+    `<label class="cd-chip" for="cd-filter-all">All</label>`,
+    ...types.map(
+      (type) => `<label class="cd-chip" for="cd-filter-${type}">${escHtml(TYPE_LABELS[type])}</label>`
+    )
+  ].join("");
+  return inputs + `<div class="cd-filters" role="group" aria-label="Filter changes by type">` + chips + `</div>`;
+}
+function renderCard(card) {
+  const mark = card.titleInferred ? ` ${INFERRED_MARK}` : "";
+  const sha = card.shortSha ? `<code class="cd-sha">${escHtml(card.shortSha)}</code>` : "";
+  const summary = card.summary ? `<p class="cd-summary">${escHtml(card.summary)}</p>` : "";
+  const chips = card.chapters.map((chip) => `<span class="cd-chapter">${escHtml(chip.label)}</span>`).join("");
+  return `<a class="cd-card cd-type-${card.type}" href="${escAttr(card.href)}"><p class="cd-meta"><span class="cd-tag cd-tag-${card.type}">${escHtml(TYPE_LABELS[card.type])}</span>` + sha + `<span class="cd-arrow" aria-hidden="true">\u2192</span></p><h3 class="cd-title">${escHtml(card.title)}${mark}</h3>` + summary + (chips === "" ? "" : `<p class="cd-chapters">${chips}</p>`) + `</a>`;
+}
+function renderCardsGrid(units) {
+  return `<div class="cd-grid">${units.map(renderCard).join("")}</div>`;
+}
+
+// packages/renderer/src/commitPage.ts
+var INFERRED_MARK2 = `<span class="prov" title="AI interpretation: narrated title, not a derived fact">\u25C7</span>`;
+var DERIVED_MARK = `<span class="prov" title="Derived deterministically from the repository">\u2713</span>`;
+var MONO = `ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`;
+var commitPageCss = `
+/* --- commit page (cp-) --- */
+.cp-page{max-width:44rem}
+.cp-meta{display:flex;align-items:center;gap:0.5rem;margin:0 0 0.75rem}
+.cp-tag{font-size:0.6875rem;font-weight:600;line-height:1.7;padding:0 0.5rem;border-radius:999px;color:#4b5563;background:#f3f4f6;border:1px solid #e5e7eb}
+.cp-tag-feature{color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe}
+.cp-sha{font-family:${MONO};font-size:0.75rem;color:#9ca3af;overflow-wrap:anywhere}
+.cp-title{margin:0 0 0.25rem}
+.cp-purpose{color:#6b7280;font-size:1rem;margin:0.25rem 0 1.5rem}
+.cp-beforeafter{margin:1.25rem 0;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff}
+.cp-row{display:flex;gap:0.75rem;padding:0.625rem 0.875rem;margin:0}
+.cp-row+.cp-row{border-top:1px solid #f3f4f6}
+.cp-row dt{flex-shrink:0;width:4.5rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;padding-top:0.3em}
+.cp-row-after dt{color:#1d4ed8}
+.cp-row dd{margin:0;overflow-wrap:anywhere}
+.cp-not-narrated{color:#9ca3af}
+.cp-diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;overflow-x:auto}
+.cp-diagram svg{display:block;max-width:100%;height:auto}
+.cp-no-diagram{display:flex;align-items:center;justify-content:center;min-height:6rem;margin:0;color:#6b7280;background:#f9fafb;border-radius:4px}
+.cp-unchanged,.cp-evidence{margin:1rem 0;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem 1rem}
+.cp-unchanged>summary,.cp-evidence>summary{cursor:pointer;color:#6b7280;font-size:0.875rem;overflow-wrap:anywhere}
+.cp-unchanged p{margin:0.5rem 0;font-size:0.875rem;color:#6b7280}
+.cp-back{margin:1.5rem 0}
+.cp-back-link{display:inline-block;color:#1d4ed8;text-decoration:none;font-weight:600;border:1px solid #bfdbfe;background:#eff6ff;border-radius:6px;padding:0.4375rem 0.875rem}
+.cp-back-link:hover{border-color:#1d4ed8}
+.cp-back-link:focus-visible{outline:2px solid #1d4ed8;outline-offset:2px}
+.cp-ev-title{margin:0.75rem 0 0.25rem;overflow-wrap:anywhere}
+.cp-ev-title code{font-family:${MONO};font-size:0.8125rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}
+.cp-ev-list{list-style:none;margin:0.5rem 0 0.75rem;padding:0}
+.cp-ev-list li{margin:0.375rem 0;overflow-wrap:anywhere}
+.cp-ev-list code{font-family:${MONO};font-size:0.8125rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}
+.cp-ev-muted{color:#6b7280}
+.cp-ev-empty{margin:0.5rem 0;color:#6b7280;font-size:0.875rem}
+@media (max-width:479px){.cp-row{flex-direction:column;gap:0.125rem}.cp-row dt{width:auto;padding-top:0}}
+`;
+function metaRow(unit) {
+  const sha = unit.shortSha ? `<code class="cp-sha">${escHtml(unit.shortSha)}</code>` : "";
+  return `<p class="cp-meta"><span class="cp-tag cp-tag-${unit.type}">${unit.type}</span>` + sha + `</p>`;
+}
+function beforeAfterRow(slot, label, text) {
+  const body = text === null ? `<span class="cp-not-narrated">Not narrated yet.</span>` : escHtml(text);
+  return `<div class="cp-row cp-row-${slot}"><dt>${label}</dt><dd>${body}</dd></div>`;
+}
+function diagramFigure(diagramSvg) {
+  const body = diagramSvg ?? `<p class="cp-no-diagram">No diagram for this change.</p>`;
+  return `<figure class="cp-diagram">${body}</figure>`;
+}
+function unchangedFold(count) {
+  if (count === 0) return "";
+  const noun = count === 1 ? "component" : "components";
+  return `<details class="cp-unchanged"><summary>Unchanged: ${count} ${noun}</summary><p>${count} ${noun} in the system ${count === 1 ? "was" : "were"} not touched by this change.</p></details>`;
+}
+function anchorLine(anchor) {
+  let text = escHtml(anchor.path);
+  if (anchor.range) {
+    text += ` <span class="cp-ev-muted">lines ${anchor.range.startLine}\u2013${anchor.range.endLine}</span>`;
+  }
+  if (anchor.symbol) {
+    text += ` <span class="cp-ev-muted">\xB7 ${escHtml(anchor.symbol)}</span>`;
+  }
+  return `<li>${DERIVED_MARK} <code>${text}</code></li>`;
+}
+function evidenceFold(unit) {
+  const commits = (unit.unit.commits ?? []).map(
+    (sha) => `<li>${DERIVED_MARK} Commit <code title="${escAttr(sha)}">${escHtml(sha.slice(0, 7))}</code></li>`
+  );
+  const anchors = (unit.unit.evidence ?? []).map(anchorLine);
+  const lines = [...commits, ...anchors];
+  const list = lines.length === 0 ? `<p class="cp-ev-empty">No recorded evidence for this change.</p>` : `<ul class="cp-ev-list">${lines.join("")}</ul>`;
+  return `<details class="cp-evidence"><summary>Technical evidence</summary><p class="cp-ev-title">${DERIVED_MARK} <code>${escHtml(unit.unit.technicalTitle)}</code></p>` + list + `</details>`;
+}
+function renderCommitPage(unit, diagramSvg) {
+  const anchorId = escAttr(unit.anchorId);
+  const mark = unit.titleInferred ? ` ${INFERRED_MARK2}` : "";
+  const purpose = unit.purpose ? `<p class="cp-purpose">${escHtml(unit.purpose)}</p>` : "";
+  return `<section class="cp-page" id="${anchorId}" aria-labelledby="${anchorId}-title">` + metaRow(unit) + `<h2 class="cp-title" id="${anchorId}-title">${escHtml(unit.title)}${mark}</h2>` + purpose + `<dl class="cp-beforeafter">` + beforeAfterRow("before", "Before", unit.before) + beforeAfterRow("after", "After", unit.after) + `</dl>` + diagramFigure(diagramSvg) + unchangedFold(unit.unchangedCount) + `<p class="cp-back"><a class="cp-back-link" href="#">\u2190 All changes</a></p>` + evidenceFold(unit) + `</section>`;
+}
+
+// packages/renderer/src/dashboardTypes.ts
+var CARD_CHIP_LABELS = {
+  systems: "Systems",
+  flows: "Flows",
+  contracts: "Contracts"
+};
+function unitAnchorId(index) {
+  return `u${index}`;
+}
+function affectedChapterChips(unit, manifest) {
+  const out = [];
+  const entityIds = new Set(unit.entities ?? []);
+  const touched = manifest.entities.filter((entity) => entityIds.has(entity.id));
+  if (touched.length > 0) out.push({ id: "systems", label: CARD_CHIP_LABELS.systems });
+  if ((unit.relationships ?? []).length > 0) {
+    out.push({ id: "flows", label: CARD_CHIP_LABELS.flows });
+  }
+  if (touched.some((e) => e.kind === "route" || e.kind === "contract")) {
+    out.push({ id: "contracts", label: CARD_CHIP_LABELS.contracts });
+  }
+  return out;
+}
+function toCardModel(unit, index, manifest) {
+  const sha = unit.commits?.[0];
+  return {
+    unitId: unit.id,
+    href: `#${unitAnchorId(index)}`,
+    title: unit.humanTitle ?? unit.technicalTitle,
+    titleInferred: unit.provenance === "inferred" && unit.humanTitle != null,
+    summary: unit.summary ?? null,
+    shortSha: sha ? sha.slice(0, 7) : null,
+    type: commitType(unit.technicalTitle),
+    chapters: affectedChapterChips(unit, manifest)
+  };
+}
+function toCommitPageModel(unit, index, manifest) {
+  const card = toCardModel(unit, index, manifest);
+  return {
+    anchorId: unitAnchorId(index),
+    title: card.title,
+    titleInferred: card.titleInferred,
+    purpose: unit.userImpact ?? unit.summary ?? null,
+    before: unit.beforeDescription ?? null,
+    after: unit.afterDescription ?? null,
+    shortSha: card.shortSha,
+    type: card.type,
+    unchangedCount: manifest.entities.filter(
+      (e) => e.headState === "unchanged"
+    ).length,
+    unit
+  };
+}
+
 // packages/renderer/src/render.ts
 var CHAPTER_QUESTIONS = {
   purpose: "Why does this system exist?",
@@ -8408,8 +8653,8 @@ var CHAPTER_QUESTIONS = {
   history: "How did it get here?"
 };
 var OVERVIEW_QUESTION = "What changed, and why does it matter?";
-var INFERRED_MARK = `<span class="prov" title="AI interpretation: narrated title, not a derived fact">\u25C7</span>`;
-var DERIVED_MARK = `<span class="prov" title="Derived deterministically from the repository">\u2713</span>`;
+var INFERRED_MARK3 = `<span class="prov" title="AI interpretation: narrated title, not a derived fact">\u25C7</span>`;
+var DERIVED_MARK2 = `<span class="prov" title="Derived deterministically from the repository">\u2713</span>`;
 var COMMIT_TYPES = ["feature", "fix", "docs", "test", "housekeeping"];
 function commitType(technicalTitle) {
   const match = /^([A-Za-z]+)(?:\([^)]*\))?!?:/.exec(technicalTitle);
@@ -8444,7 +8689,7 @@ function shortSha(sha) {
 function unitTitle(unit) {
   return unit.humanTitle ?? unit.technicalTitle;
 }
-function anchorLine(anchor) {
+function anchorLine2(anchor) {
   let text = escHtml(anchor.path);
   if (anchor.range) {
     text += ` <span class="muted">lines ${anchor.range.startLine}\u2013${anchor.range.endLine}</span>`;
@@ -8452,13 +8697,13 @@ function anchorLine(anchor) {
   if (anchor.symbol) {
     text += ` <span class="muted">\xB7 ${escHtml(anchor.symbol)}</span>`;
   }
-  return `<li>${DERIVED_MARK} <code>${text}</code></li>`;
+  return `<li>${DERIVED_MARK2} <code>${text}</code></li>`;
 }
 function evidenceDetails(anchors) {
   if (anchors.length === 0) return "";
-  return `<details><summary>Technical evidence</summary><ul class="evidence">${anchors.map(anchorLine).join("")}</ul></details>`;
+  return `<details><summary>Technical evidence</summary><ul class="evidence">${anchors.map(anchorLine2).join("")}</ul></details>`;
 }
-function diagramFigure(request, renderDiagram, caption) {
+function diagramFigure2(request, renderDiagram, caption) {
   const svg = renderDiagram ? renderDiagram(request) : null;
   const captionHtml = caption === "" ? "" : `<p class="caption">${escHtml(caption)}</p>`;
   if (svg === null) {
@@ -8474,7 +8719,7 @@ function timeline(units) {
     return sha ? ` <code class="timeline-sha">${escHtml(shortSha(sha))}</code>` : "";
   };
   const nodes = meaningful.map((unit) => {
-    const mark = unit.provenance === "inferred" ? ` ${INFERRED_MARK}` : "";
+    const mark = unit.provenance === "inferred" ? ` ${INFERRED_MARK3}` : "";
     return `<li><span class="timeline-title">${escHtml(unitTitle(unit))}</span>${mark}${shaHtml(unit)}</li>`;
   }).join("");
   let html = `<ol class="timeline">${nodes}</ol>`;
@@ -8512,37 +8757,11 @@ function viewHead(title, subtitle) {
   const sub = subtitle === "" ? "" : `<p class="view-sub">${subtitle}</p>`;
   return `<h2>${escHtml(title)}</h2>${sub}`;
 }
-function affectedChapters(unit, change) {
-  const out = [];
-  const entityIds = new Set(unit.entities ?? []);
-  const touched = change.entities.filter((entity) => entityIds.has(entity.id));
-  if (touched.length > 0) out.push("systems");
-  if ((unit.relationships ?? []).length > 0) out.push("flows");
-  if (touched.some((entity) => entity.kind === "route" || entity.kind === "contract")) {
-    out.push("contracts");
-  }
-  return out;
-}
-var CHAPTER_CHIP_LABELS = {
-  systems: "Systems",
-  flows: "Flows",
-  contracts: "Contracts"
-};
-function commitCard(unit, change) {
-  const type = commitType(unit.technicalTitle);
-  const sha = unit.commits?.[0];
-  const shaHtml = sha ? `<code class="card-sha">${escHtml(shortSha(sha))}</code>` : "";
-  const mark = unit.provenance === "inferred" ? ` ${INFERRED_MARK}` : "";
-  const summary = unit.summary ? `<p class="card-summary">${escHtml(unit.summary)}</p>` : "";
-  const chips = affectedChapters(unit, change).map((id) => `<span class="chip">${CHAPTER_CHIP_LABELS[id]}</span>`).join("");
-  const chipsHtml = chips === "" ? "" : `<p class="card-chips">${chips}</p>`;
-  return `<article class="card type-${type}"><p class="card-meta"><span class="tag tag-${type}">${type}</span>${shaHtml}</p><h3 class="card-title">${escHtml(unitTitle(unit))}${mark}</h3>` + summary + chipsHtml + `</article>`;
-}
 function homeView(meaningful, change) {
   const count = meaningful.length;
   const head = viewHead(
     "All changes",
-    escHtml(`${count} meaningful change${count === 1 ? "" : "s"} in this comparison.`)
+    `${count} meaningful change${count === 1 ? "" : "s"} \xB7 <span class="rev">${escHtml(shortRev(change.baseRevision))}</span> \u2192 <span class="rev">${escHtml(shortRev(change.headRevision))}</span>`
   );
   if (count === 0) {
     return head + `<p class="muted">No meaningful changes in this comparison.</p>`;
@@ -8550,16 +8769,18 @@ function homeView(meaningful, change) {
   const present = COMMIT_TYPES.filter(
     (type) => meaningful.some((unit) => commitType(unit.technicalTitle) === type)
   );
-  const inputs = [
-    `<input type="radio" name="filter" id="f-all" checked>`,
-    ...present.map((type) => `<input type="radio" name="filter" id="f-${type}">`)
-  ].join("");
-  const chips = [
-    `<label for="f-all">All</label>`,
-    ...present.map((type) => `<label for="f-${type}">${type}</label>`)
-  ].join("");
-  const cards = meaningful.map((unit) => commitCard(unit, change)).join("");
-  return head + inputs + `<div class="filters">${chips}</div><div class="grid">${cards}</div>`;
+  const cards = meaningful.map((unit, index) => toCardModel(unit, index, change));
+  return head + renderFilterChips(present) + renderCardsGrid(cards);
+}
+function commitPageSection(unit, index, change, options) {
+  const entityIds = new Set(unit.entities ?? []);
+  const entities = change.entities.filter((entity) => entityIds.has(entity.id));
+  const relationshipIds = new Set(unit.relationships ?? []);
+  const relationships = unit.relationships !== void 0 ? change.relationships.filter((rel) => relationshipIds.has(rel.id)) : change.relationships.filter(
+    (rel) => entityIds.has(rel.from) && entityIds.has(rel.to)
+  );
+  const svg = options.renderDiagram ? options.renderDiagram({ kind: "change", entities, relationships, changeUnit: unit }) : null;
+  return renderCommitPage(toCommitPageModel(unit, index, change), svg);
 }
 function overviewView(book, change, meaningful) {
   const count = meaningful.length;
@@ -8576,7 +8797,7 @@ function architectureView(book, change, options) {
   if (chapter === void 0 || chapter.status === "not-written") {
     return head + `<p class="muted">Not yet written.</p>`;
   }
-  return head + diagramFigure(
+  return head + diagramFigure2(
     {
       kind: "context",
       entities: change.entities,
@@ -8616,25 +8837,18 @@ function moreView(book, change) {
   ).filter((chapter) => chapter !== void 0).map((chapter) => chapterFold(chapter, change)).join("");
   return viewHead("More", "The rest of the book, folded until needed.") + folds;
 }
-var ACTIVE_TAB = `color:#1d4ed8;background:#eff6ff;font-weight:600`;
-var ACTIVE_CHIP = `color:#1d4ed8;border-color:#1d4ed8;background:#eff6ff;font-weight:600`;
-var FOCUS_RING = `outline:2px solid #1d4ed8;outline-offset:2px`;
-function stylesheet(presentTypes) {
-  const filterRules = [];
-  for (const id of ["all", ...presentTypes]) {
-    filterRules.push(`#f-${id}:checked~.filters label[for="f-${id}"]{${ACTIVE_CHIP}}`);
-    filterRules.push(
-      `#f-${id}:focus-visible~.filters label[for="f-${id}"]{${FOCUS_RING}}`
-    );
-  }
-  for (const type of presentTypes) {
-    filterRules.push(
-      `#f-${type}:checked~.grid .card:not(.type-${type}){display:none}`
-    );
-  }
-  const tabRules = ["overview", "architecture", "how-it-works", "more"].map(
-    (id) => `body:has(#${id}:target) .tabs a[href="#${id}"]{${ACTIVE_TAB}}`
-  );
+var ACTIVE_TAB = `color:#1d4ed8;background:#eff6ff;border-left-color:#1d4ed8;font-weight:600`;
+var INACTIVE_TAB = `color:#4b5563;background:transparent;border-left-color:transparent;font-weight:400`;
+var FOCUS_RING2 = `outline:2px solid #1d4ed8;outline-offset:2px`;
+var OTHER_VIEW_IDS = ["overview", "architecture", "how-it-works", "more"];
+function shellCss() {
+  const anyOtherTargeted = OTHER_VIEW_IDS.map((id) => `#${id}:target`).join(",");
+  const tabRules = [
+    `body:has(${anyOtherTargeted}) .sb-item-active .sb-tab{${INACTIVE_TAB}}`,
+    ...OTHER_VIEW_IDS.map(
+      (id) => `body:has(#${id}:target) .sb-tabs a[href="#${id}"]{${ACTIVE_TAB}}`
+    )
+  ];
   return [
     // Reset + base. System fonts, generous whitespace, neutral grays, one accent.
     `*,*::before,*::after{box-sizing:border-box}`,
@@ -8642,66 +8856,43 @@ function stylesheet(presentTypes) {
     // Long repo-controlled tokens (paths, identifiers) must wrap so 320px
     // never scrolls horizontally.
     `h1,h2,h3,p,label,summary,figcaption,a{overflow-wrap:anywhere}`,
-    `a:focus-visible{${FOCUS_RING}}`,
+    `a:focus-visible{${FOCUS_RING2}}`,
     // Skip link: clipped off-screen but focusable; revealed on focus.
     `.skip-link{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%)}`,
     `.skip-link:focus{position:fixed;top:0.5rem;left:0.5rem;width:auto;height:auto;margin:0;overflow:visible;clip:auto;clip-path:none;background:#ffffff;color:#1d4ed8;padding:0.5rem 1rem;border:1px solid #1d4ed8;border-radius:4px;z-index:1}`,
-    // Two-pane dashboard: sticky sidebar left, content right.
+    // Two-pane dashboard: the sidebar module's <nav> is the left column
+    // (it carries its own width, stickiness, and 736px collapse); main
+    // fills the rest.
     `.layout{display:flex;max-width:74rem;margin:0 auto;min-height:100vh}`,
-    `.sidebar{position:sticky;top:0;align-self:flex-start;flex-shrink:0;width:14rem;max-height:100vh;overflow-y:auto;padding:2rem 1.25rem 2rem 1.5rem}`,
-    `main{flex:1;min-width:0;background:#ffffff;border-left:1px solid #e5e7eb;padding:2rem 2rem 4rem}`,
-    // Wordmark masthead: small eyebrow, medium repo name, muted subtitle
-    // with the shortened revisions as secondary evidence.
-    `.masthead-kicker{margin:0 0 0.25rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280}`,
-    `h1{font-size:1.0625rem;font-weight:600;margin:0}`,
-    `.subtitle{color:#6b7280;font-size:0.8125rem;margin:0.375rem 0 0}`,
-    `.subtitle .rev{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.75rem;color:#9ca3af;overflow-wrap:anywhere}`,
-    // Vertical tab nav. Home is lit by default; :has() moves the light when
-    // another view is targeted (browsers without :has just keep Home lit).
-    `.tabs{display:flex;flex-direction:column;gap:0.125rem;margin-top:1.75rem}`,
-    `.tabs a{display:block;color:#4b5563;text-decoration:none;font-size:0.875rem;line-height:1.5;padding:0.4375rem 0.75rem;border-radius:6px}`,
-    `.tabs a:hover{color:#1f2937;background:#f3f4f6}`,
-    `.tabs a[href="#home"]{${ACTIVE_TAB}}`,
-    `body:has(#overview:target,#architecture:target,#how-it-works:target,#more:target) .tabs a[href="#home"]{color:#4b5563;background:transparent;font-weight:400}`,
-    ...tabRules,
-    // Views: hidden unless targeted; Home (the last section) is the default
-    // and hides via a plain sibling rule when any other view is targeted.
+    `main{flex:1;min-width:0;background:#ffffff;padding:2rem 2rem 4rem}`,
+    // ------------------------------------------------------------------
+    // The :target visibility mechanism. Every view and commit page is a
+    // direct <section> child of main, hidden by default and shown when
+    // targeted. Home is deliberately the LAST section: a plain general-
+    // sibling rule hides it whenever ANY earlier section is targeted, so
+    // the default view needs no :has and degrades sanely (no fragment →
+    // Home; unknown fragment → Home; browser Back walks the fragment
+    // history).
+    // ------------------------------------------------------------------
     `main>section{display:none;padding-bottom:2rem}`,
     `main>section:target{display:block}`,
     `#home{display:block}`,
     `main>section:target~#home{display:none}`,
     `#overview,#architecture,#how-it-works,#more{max-width:44rem}`,
+    ...tabRules,
     // Type scale: view heading > sidebar wordmark > metadata.
     `h2{font-size:1.5rem;font-weight:600;letter-spacing:-0.015em;margin:0 0 0.25rem}`,
     `.view-sub{color:#6b7280;font-size:1rem;margin:0.25rem 0 1.5rem}`,
+    `.view-sub .rev{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.8125rem;color:#9ca3af;overflow-wrap:anywhere}`,
     `h3{font-size:0.75rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;margin:2rem 0 0.75rem}`,
     `p{margin:0.75rem 0}`,
     `.muted{color:#6b7280}`,
     `code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.875em;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}`,
     `ul,ol{margin:0.5rem 0;padding-left:1.5rem}`,
     `li{margin:0.25rem 0;overflow-wrap:anywhere}`,
-    // Provenance markers: glyph + text + title attribute; never colour-only.
-    `.badge{display:inline-block;font-size:0.6875rem;line-height:1.7;color:#6b7280;border:1px solid #d1d5db;border-radius:999px;padding:0 0.5rem;vertical-align:middle}`,
+    // Provenance marks: glyph + title attribute; never colour-only. Shared
+    // primitive reused by the cards and commit-page modules.
     `.prov{color:#6b7280;font-size:0.875em}`,
-    // Filter chips: visually hidden but focusable radios + chip labels.
-    `input[name="filter"]{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%)}`,
-    `.filters{display:flex;flex-wrap:wrap;gap:0.375rem;margin:0 0 1.25rem}`,
-    `.filters label{cursor:pointer;color:#4b5563;font-size:0.8125rem;line-height:1.5;padding:0.25rem 0.75rem;border:1px solid #e5e7eb;border-radius:999px;background:#ffffff}`,
-    `.filters label:hover{color:#1f2937;border-color:#d1d5db;background:#f9fafb}`,
-    ...filterRules,
-    // Commit cards: a repo-card grid that reads as clickable (border +
-    // hover shadow); single column falls out naturally at 320px.
-    `.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem}`,
-    `.card{display:flex;flex-direction:column;gap:0.375rem;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:1rem;color:inherit;text-decoration:none}`,
-    `.card:hover{border-color:#d1d5db;box-shadow:0 2px 8px rgba(17,24,39,0.08)}`,
-    `.card-meta{display:flex;align-items:center;gap:0.5rem;margin:0}`,
-    `.tag{font-size:0.6875rem;font-weight:600;line-height:1.7;padding:0 0.5rem;border-radius:999px;color:#4b5563;background:#f3f4f6;border:1px solid #e5e7eb}`,
-    `.tag-feature{color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe}`,
-    `code.card-sha{background:transparent;border:none;padding:0;color:#9ca3af;font-size:0.75rem}`,
-    `.card .card-title{font-size:0.9375rem;font-weight:600;letter-spacing:0;text-transform:none;color:#1f2937;margin:0}`,
-    `.card-summary{font-size:0.8125rem;color:#6b7280;margin:0}`,
-    `.card-chips{display:flex;flex-wrap:wrap;gap:0.25rem;margin:auto 0 0;padding-top:0.375rem}`,
-    `.chip{font-size:0.6875rem;line-height:1.7;color:#6b7280;border:1px solid #e5e7eb;border-radius:999px;padding:0 0.5rem}`,
     // Diagrams get room; overflow-x:auto keeps an oversized diagram
     // scrolling inside its own figure instead of widening the page at 320px.
     `figure.diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;overflow-x:auto}`,
@@ -8725,33 +8916,30 @@ function stylesheet(presentTypes) {
     // Housekeeping commits: quieter than regular evidence details.
     `details.housekeeping{border:none;border-radius:0;padding:0;margin:0.25rem 0 0}`,
     `details.housekeeping summary{font-size:0.8125rem}`,
-    // Under 736px the sidebar collapses to a horizontally scrollable tab
-    // row on top — the page itself never scrolls sideways at 320px.
-    `@media (max-width:735px){.layout{flex-direction:column}.sidebar{position:static;width:100%;max-height:none;overflow:visible;padding:1.5rem 1.25rem 0}.tabs{flex-direction:row;overflow-x:auto;gap:0.25rem;margin-top:1rem;padding-bottom:0.75rem}.tabs a{white-space:nowrap;flex-shrink:0}main{border-left:none;padding:1.5rem 1.25rem 3rem}}`
+    // Under 736px the sidebar module collapses its <nav> to a horizontally
+    // scrollable tab row; the shell stacks the layout so the page itself
+    // never scrolls sideways at 320px. Breakpoint matches sidebarCss.
+    `@media (max-width:736px){.layout{flex-direction:column}main{padding:1.5rem 1.25rem 3rem}}`
   ].join("\n");
+}
+function stylesheet() {
+  return [shellCss(), sidebarCss, cardsCss, commitPageCss].join("\n");
 }
 var CSP_CONTENT = "default-src 'none'; style-src 'unsafe-inline'; img-src data:;";
 var TABS = [
-  { id: "home", label: "Home" },
-  { id: "overview", label: "Overview" },
-  { id: "architecture", label: "Architecture" },
-  { id: "how-it-works", label: "How it works" },
-  { id: "more", label: "More" }
+  { id: "home", label: "Home", href: "#home" },
+  { id: "overview", label: "Overview", href: "#overview" },
+  { id: "architecture", label: "Architecture", href: "#architecture" },
+  { id: "how-it-works", label: "How it works", href: "#how-it-works" },
+  { id: "more", label: "More", href: "#more" }
 ];
 function renderChangeBook(book, change, options = {}) {
   const meaningful = change.changeUnits.filter((unit) => !unit.grouped);
-  const presentTypes = COMMIT_TYPES.filter(
-    (type) => meaningful.some((unit) => commitType(unit.technicalTitle) === type)
-  );
-  const sections = `<section id="overview">${overviewView(book, change, meaningful)}</section><section id="architecture">${architectureView(book, change, options)}</section><section id="how-it-works">${howItWorksView(change)}</section><section id="more">${moreView(book, change)}</section><section id="home">${homeView(meaningful, change)}</section>`;
-  const tabs = TABS.map(
-    (tab) => `<a href="#${tab.id}">${tab.label}</a>`
-  ).join("");
+  const commitPages = meaningful.map((unit, index) => commitPageSection(unit, index, change, options)).join("");
+  const sections = `<section id="overview">${overviewView(book, change, meaningful)}</section><section id="architecture">${architectureView(book, change, options)}</section><section id="how-it-works">${howItWorksView(change)}</section><section id="more">${moreView(book, change)}</section>` + commitPages + `<section id="home">${homeView(meaningful, change)}</section>`;
   const displayName = options.repoName ?? change.repository.name;
   const title = escHtml(`${displayName} \u2014 change book`);
-  const count = meaningful.length;
-  const subtitle = `${count} change${count === 1 ? "" : "s"} \xB7 <span class="rev">${escHtml(shortRev(change.baseRevision))}</span> \u2192 <span class="rev">${escHtml(shortRev(change.headRevision))}</span>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_CONTENT}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${stylesheet(presentTypes)}</style></head><body><a class="skip-link" href="#main">Skip to content</a><div class="layout"><aside class="sidebar"><header class="masthead"><p class="masthead-kicker">Change book</p><h1>${escHtml(displayName)}</h1><p class="subtitle">${subtitle}</p></header><nav class="tabs" aria-label="Views">${tabs}</nav></aside><main id="main">` + sections + `</main></div></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_CONTENT}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${stylesheet()}</style></head><body><a class="skip-link" href="#main">Skip to content</a><div class="layout">` + renderSidebar(TABS, "home", displayName) + `<main id="main">` + sections + `</main></div></body></html>`;
 }
 
 // packages/cli/src/commands/compare.ts

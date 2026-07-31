@@ -1,25 +1,33 @@
 /**
  * HTML shell renderer — one self-contained, scriptless, offline document.
  *
- * Mandates (user + design doc):
- *   - A LIGHT dashboard with a LEFT SIDEBAR NAV, not a linear book. The
- *     sidebar carries the repo wordmark and five view tabs (Home, Overview,
- *     Architecture, How it works, More); under 736px it collapses to a
- *     horizontally scrollable tab row.
- *   - Home (the default view) is a grid of commit cards: narrated title,
- *     one-line summary, short sha, a type tag derived from the
- *     conventional-commit prefix, and affected-chapter chips. CSS-only
- *     filter chips (radio inputs + sibling selectors) sit above the grid.
- *   - Zero JavaScript. The CSP bans scripts entirely; view switching is
- *     anchor + `:target` (real URL fragments, so browser Back works), with
- *     Home as the last section so a plain sibling rule hides it when any
- *     other view is targeted — no `:has` required for the core mechanism.
- *   - Clean, standard, low cognitive load. LIGHT THEME ONLY in v0.1: system
- *     font stack, generous whitespace, neutral grays + one accent.
- *   - Explicit provenance markers (◇ AI interpretation, ✓ derived) — glyph +
- *     text, never colour as the only carrier.
+ * INTEGRATOR module: composes the three dashboard modules
+ * (sidebar.ts / cards.ts / commitPage.ts — see dashboard-contract.md) into
+ * the final document. This file owns:
+ *   - the layout grid (sticky sidebar left, main content right)
+ *   - the `:target` visibility mechanism (sections hidden by default,
+ *     `:target` visible, Home visible when nothing is targeted)
+ *   - concatenating the module CSS constants with the base light theme
+ *     into the single `<style>`
+ *   - the remaining views (Overview / Architecture / How it works / More)
+ *     that regroup the ten canonical chapter projections
+ *
+ * Mandates (user + design doc "Reader experience"):
+ *   - A LIGHT dashboard with a LEFT SIDEBAR NAV (repo wordmark + five view
+ *     tabs); under ~736px it collapses to a horizontally scrollable tab row.
+ *   - Home (the default view) is a grid of commit cards with CSS-only
+ *     filter chips above it.
+ *   - Clicking a card opens that commit's own page via anchor + `:target`
+ *     (real URL fragments, so browser Back works).
+ *   - Zero JavaScript. The CSP bans scripts entirely. Home is the LAST
+ *     section so a plain sibling rule hides it when any other section is
+ *     targeted — no `:has` required for the core mechanism (`:has` only
+ *     upgrades the sidebar active-tab highlight; without it Home simply
+ *     stays lit).
+ *   - Explicit provenance markers (◇ AI interpretation, ✓ derived) — glyph
+ *     + text, never colour as the only carrier.
  *   - Every repo-controlled string goes through escape.ts. Element ids and
- *     CSS selectors are generated locally (`home`, `f-feature`, `u0`…),
+ *     CSS selectors are generated locally (`home`, `u0`, `cd-filter-*`…),
  *     never repo-derived.
  */
 
@@ -35,6 +43,14 @@ import type {
   Relationship
 } from "@gitiviz/schema";
 import { escHtml } from "./escape.js";
+import { renderSidebar, sidebarCss } from "./sidebar.js";
+import { cardsCss, renderCardsGrid, renderFilterChips } from "./cards.js";
+import { commitPageCss, renderCommitPage } from "./commitPage.js";
+import {
+  toCardModel,
+  toCommitPageModel,
+  type ViewTab
+} from "./dashboardTypes.js";
 
 // ---------------------------------------------------------------------------
 // Diagram insertion point (implemented by the diagram module)
@@ -55,6 +71,8 @@ export interface DiagramRequest {
  * `null` (or omitting the callback) renders a quiet placeholder instead.
  * The returned string is inserted verbatim — the diagram module owns its
  * escaping and must obey the same rules (no scripts, no external refs).
+ * This is also the clean insertion point for a future Mermaid export
+ * adapter.
  */
 export type RenderDiagram = (request: DiagramRequest) => string | null;
 
@@ -91,12 +109,9 @@ const OVERVIEW_QUESTION = "What changed, and why does it matter?";
 /**
  * Provenance markers (visual language: ◇ AI interpretation, ✓ derived).
  * Glyph + text + title attribute — colour is never the only carrier.
+ * The `prov` class is the shared primitive reused (not restyled) by the
+ * cards and commit-page modules.
  */
-const INFERRED_BADGE =
-  `<span class="badge badge-inferred" ` +
-  `title="AI interpretation: this text was written by the narrator from the derived facts. Verify it against the evidence.">` +
-  `◇ AI interpretation</span>`;
-
 const INFERRED_MARK =
   `<span class="prov" title="AI interpretation: narrated title, not a derived fact">◇</span>`;
 
@@ -151,7 +166,7 @@ function shortRev(rev: string): string {
   return rev === "WORKTREE" ? "working tree" : rev.slice(0, 10);
 }
 
-/** 7-char commit sha for quiet evidence markers on cards and timelines. */
+/** 7-char commit sha for quiet evidence markers on timelines. */
 function shortSha(sha: string): string {
   return sha.slice(0, 7);
 }
@@ -278,59 +293,20 @@ function viewHead(title: string, subtitle: string): string {
 }
 
 /**
- * Which book chapters a change unit affects, projected onto the closed
- * chapter-chip vocabulary. Deterministic and derived-only: entities →
- * systems, relationships → flows, routes/contracts → contracts.
+ * Home (the default view): filter chips (CSS-only radios, module B) above
+ * the commit cards grid (module B). The chip string emits its radio inputs
+ * as top-level nodes, so placing it directly before the grid string under
+ * this same `<section>` parent makes the inputs document siblings of
+ * `.cd-filters` AND `.cd-grid` — exactly what the `~` selectors in
+ * `cardsCss` require.
  */
-function affectedChapters(unit: ChangeUnit, change: ChangeManifest): ChapterId[] {
-  const out: ChapterId[] = [];
-  const entityIds = new Set(unit.entities ?? []);
-  const touched = change.entities.filter((entity) => entityIds.has(entity.id));
-  if (touched.length > 0) out.push("systems");
-  if ((unit.relationships ?? []).length > 0) out.push("flows");
-  if (touched.some((entity) => entity.kind === "route" || entity.kind === "contract")) {
-    out.push("contracts");
-  }
-  return out;
-}
-
-const CHAPTER_CHIP_LABELS: Partial<Record<ChapterId, string>> = {
-  systems: "Systems",
-  flows: "Flows",
-  contracts: "Contracts"
-};
-
-/** One commit card on the home grid. */
-function commitCard(unit: ChangeUnit, change: ChangeManifest): string {
-  const type = commitType(unit.technicalTitle);
-  const sha = unit.commits?.[0];
-  const shaHtml = sha
-    ? `<code class="card-sha">${escHtml(shortSha(sha))}</code>`
-    : "";
-  const mark = unit.provenance === "inferred" ? ` ${INFERRED_MARK}` : "";
-  const summary = unit.summary
-    ? `<p class="card-summary">${escHtml(unit.summary)}</p>`
-    : "";
-  const chips = affectedChapters(unit, change)
-    .map((id) => `<span class="chip">${CHAPTER_CHIP_LABELS[id]}</span>`)
-    .join("");
-  const chipsHtml = chips === "" ? "" : `<p class="card-chips">${chips}</p>`;
-  return (
-    `<article class="card type-${type}">` +
-    `<p class="card-meta"><span class="tag tag-${type}">${type}</span>${shaHtml}</p>` +
-    `<h3 class="card-title">${escHtml(unitTitle(unit))}${mark}</h3>` +
-    summary +
-    chipsHtml +
-    `</article>`
-  );
-}
-
-/** Home: filter chips (CSS-only radios) above the commit cards grid. */
 function homeView(meaningful: ChangeUnit[], change: ChangeManifest): string {
   const count = meaningful.length;
   const head = viewHead(
     "All changes",
-    escHtml(`${count} meaningful change${count === 1 ? "" : "s"} in this comparison.`)
+    `${count} meaningful change${count === 1 ? "" : "s"} · ` +
+      `<span class="rev">${escHtml(shortRev(change.baseRevision))}</span> → ` +
+      `<span class="rev">${escHtml(shortRev(change.headRevision))}</span>`
   );
   if (count === 0) {
     return head + `<p class="muted">No meaningful changes in this comparison.</p>`;
@@ -338,21 +314,35 @@ function homeView(meaningful: ChangeUnit[], change: ChangeManifest): string {
   const present = COMMIT_TYPES.filter((type) =>
     meaningful.some((unit) => commitType(unit.technicalTitle) === type)
   );
-  const inputs = [
-    `<input type="radio" name="filter" id="f-all" checked>`,
-    ...present.map((type) => `<input type="radio" name="filter" id="f-${type}">`)
-  ].join("");
-  const chips = [
-    `<label for="f-all">All</label>`,
-    ...present.map((type) => `<label for="f-${type}">${type}</label>`)
-  ].join("");
-  const cards = meaningful.map((unit) => commitCard(unit, change)).join("");
-  return (
-    head +
-    inputs +
-    `<div class="filters">${chips}</div>` +
-    `<div class="grid">${cards}</div>`
-  );
+  const cards = meaningful.map((unit, index) => toCardModel(unit, index, change));
+  return head + renderFilterChips(present) + renderCardsGrid(cards);
+}
+
+/**
+ * One commit's own page (module C), reached by clicking its card. The
+ * before→after diagram is scoped to the entities/relationships the unit
+ * touches and compiled through the existing SVG engine (`renderDiagram`),
+ * which doubles as the future Mermaid insertion point.
+ */
+function commitPageSection(
+  unit: ChangeUnit,
+  index: number,
+  change: ChangeManifest,
+  options: RenderOptions
+): string {
+  const entityIds = new Set(unit.entities ?? []);
+  const entities = change.entities.filter((entity) => entityIds.has(entity.id));
+  const relationshipIds = new Set(unit.relationships ?? []);
+  const relationships =
+    unit.relationships !== undefined
+      ? change.relationships.filter((rel) => relationshipIds.has(rel.id))
+      : change.relationships.filter(
+          (rel) => entityIds.has(rel.from) && entityIds.has(rel.to)
+        );
+  const svg = options.renderDiagram
+    ? options.renderDiagram({ kind: "change", entities, relationships, changeUnit: unit })
+    : null;
+  return renderCommitPage(toCommitPageModel(unit, index, change), svg);
 }
 
 /** Overview: what the repo is + a brief summary of this change. */
@@ -467,26 +457,38 @@ function moreView(book: BookManifest, change: ChangeManifest): string {
 // Stylesheet (light theme only — user mandate; no dark scheme in v0.1)
 // ---------------------------------------------------------------------------
 
-const ACTIVE_TAB = `color:#1d4ed8;background:#eff6ff;font-weight:600`;
-const ACTIVE_CHIP = `color:#1d4ed8;border-color:#1d4ed8;background:#eff6ff;font-weight:600`;
+/**
+ * The sidebar module's active-tab look, mirrored by the shell's :target
+ * rules so the highlight follows the targeted view. Keep in sync with
+ * `.sb-item-active .sb-tab` in sidebarCss.
+ */
+const ACTIVE_TAB =
+  `color:#1d4ed8;background:#eff6ff;border-left-color:#1d4ed8;font-weight:600`;
+const INACTIVE_TAB =
+  `color:#4b5563;background:transparent;border-left-color:transparent;font-weight:400`;
 const FOCUS_RING = `outline:2px solid #1d4ed8;outline-offset:2px`;
 
-function stylesheet(presentTypes: readonly CommitType[]): string {
-  const filterRules: string[] = [];
-  for (const id of ["all", ...presentTypes]) {
-    filterRules.push(`#f-${id}:checked~.filters label[for="f-${id}"]{${ACTIVE_CHIP}}`);
-    filterRules.push(
-      `#f-${id}:focus-visible~.filters label[for="f-${id}"]{${FOCUS_RING}}`
-    );
-  }
-  for (const type of presentTypes) {
-    filterRules.push(
-      `#f-${type}:checked~.grid .card:not(.type-${type}){display:none}`
-    );
-  }
-  const tabRules = ["overview", "architecture", "how-it-works", "more"].map(
-    (id) => `body:has(#${id}:target) .tabs a[href="#${id}"]{${ACTIVE_TAB}}`
-  );
+/** View ids other than home (home is the :target-less default). */
+const OTHER_VIEW_IDS = ["overview", "architecture", "how-it-works", "more"] as const;
+
+/**
+ * Base/shell CSS: reset, light theme, layout grid, the `:target`
+ * visibility mechanism, and the shared views (overview/architecture/
+ * how-it-works/more, timeline, evidence). Module CSS (sb-/cd-/cp-) is
+ * concatenated separately.
+ */
+function shellCss(): string {
+  // Sidebar active-tab highlight follows the targeted view. Progressive
+  // enhancement: browsers without :has simply keep Home lit (the static
+  // sb-item-active class from the sidebar module). Commit pages (#u…)
+  // deliberately keep Home lit — they belong to the Home view.
+  const anyOtherTargeted = OTHER_VIEW_IDS.map((id) => `#${id}:target`).join(",");
+  const tabRules = [
+    `body:has(${anyOtherTargeted}) .sb-item-active .sb-tab{${INACTIVE_TAB}}`,
+    ...OTHER_VIEW_IDS.map(
+      (id) => `body:has(#${id}:target) .sb-tabs a[href="#${id}"]{${ACTIVE_TAB}}`
+    )
+  ];
   return [
     // Reset + base. System fonts, generous whitespace, neutral grays, one accent.
     `*,*::before,*::after{box-sizing:border-box}`,
@@ -502,40 +504,31 @@ function stylesheet(presentTypes: readonly CommitType[]): string {
     `.skip-link:focus{position:fixed;top:0.5rem;left:0.5rem;width:auto;height:auto;margin:0;` +
       `overflow:visible;clip:auto;clip-path:none;background:#ffffff;color:#1d4ed8;` +
       `padding:0.5rem 1rem;border:1px solid #1d4ed8;border-radius:4px;z-index:1}`,
-    // Two-pane dashboard: sticky sidebar left, content right.
+    // Two-pane dashboard: the sidebar module's <nav> is the left column
+    // (it carries its own width, stickiness, and 736px collapse); main
+    // fills the rest.
     `.layout{display:flex;max-width:74rem;margin:0 auto;min-height:100vh}`,
-    `.sidebar{position:sticky;top:0;align-self:flex-start;flex-shrink:0;width:14rem;` +
-      `max-height:100vh;overflow-y:auto;padding:2rem 1.25rem 2rem 1.5rem}`,
-    `main{flex:1;min-width:0;background:#ffffff;border-left:1px solid #e5e7eb;` +
-      `padding:2rem 2rem 4rem}`,
-    // Wordmark masthead: small eyebrow, medium repo name, muted subtitle
-    // with the shortened revisions as secondary evidence.
-    `.masthead-kicker{margin:0 0 0.25rem;font-size:0.6875rem;font-weight:600;` +
-      `letter-spacing:0.08em;text-transform:uppercase;color:#6b7280}`,
-    `h1{font-size:1.0625rem;font-weight:600;margin:0}`,
-    `.subtitle{color:#6b7280;font-size:0.8125rem;margin:0.375rem 0 0}`,
-    `.subtitle .rev{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;` +
-      `font-size:0.75rem;color:#9ca3af;overflow-wrap:anywhere}`,
-    // Vertical tab nav. Home is lit by default; :has() moves the light when
-    // another view is targeted (browsers without :has just keep Home lit).
-    `.tabs{display:flex;flex-direction:column;gap:0.125rem;margin-top:1.75rem}`,
-    `.tabs a{display:block;color:#4b5563;text-decoration:none;font-size:0.875rem;` +
-      `line-height:1.5;padding:0.4375rem 0.75rem;border-radius:6px}`,
-    `.tabs a:hover{color:#1f2937;background:#f3f4f6}`,
-    `.tabs a[href="#home"]{${ACTIVE_TAB}}`,
-    `body:has(#overview:target,#architecture:target,#how-it-works:target,#more:target) ` +
-      `.tabs a[href="#home"]{color:#4b5563;background:transparent;font-weight:400}`,
-    ...tabRules,
-    // Views: hidden unless targeted; Home (the last section) is the default
-    // and hides via a plain sibling rule when any other view is targeted.
+    `main{flex:1;min-width:0;background:#ffffff;padding:2rem 2rem 4rem}`,
+    // ------------------------------------------------------------------
+    // The :target visibility mechanism. Every view and commit page is a
+    // direct <section> child of main, hidden by default and shown when
+    // targeted. Home is deliberately the LAST section: a plain general-
+    // sibling rule hides it whenever ANY earlier section is targeted, so
+    // the default view needs no :has and degrades sanely (no fragment →
+    // Home; unknown fragment → Home; browser Back walks the fragment
+    // history).
+    // ------------------------------------------------------------------
     `main>section{display:none;padding-bottom:2rem}`,
     `main>section:target{display:block}`,
     `#home{display:block}`,
     `main>section:target~#home{display:none}`,
     `#overview,#architecture,#how-it-works,#more{max-width:44rem}`,
+    ...tabRules,
     // Type scale: view heading > sidebar wordmark > metadata.
     `h2{font-size:1.5rem;font-weight:600;letter-spacing:-0.015em;margin:0 0 0.25rem}`,
     `.view-sub{color:#6b7280;font-size:1rem;margin:0.25rem 0 1.5rem}`,
+    `.view-sub .rev{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;` +
+      `font-size:0.8125rem;color:#9ca3af;overflow-wrap:anywhere}`,
     `h3{font-size:0.75rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;` +
       `color:#6b7280;margin:2rem 0 0.75rem}`,
     `p{margin:0.75rem 0}`,
@@ -544,35 +537,9 @@ function stylesheet(presentTypes: readonly CommitType[]): string {
       `background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}`,
     `ul,ol{margin:0.5rem 0;padding-left:1.5rem}`,
     `li{margin:0.25rem 0;overflow-wrap:anywhere}`,
-    // Provenance markers: glyph + text + title attribute; never colour-only.
-    `.badge{display:inline-block;font-size:0.6875rem;line-height:1.7;color:#6b7280;` +
-      `border:1px solid #d1d5db;border-radius:999px;padding:0 0.5rem;vertical-align:middle}`,
+    // Provenance marks: glyph + title attribute; never colour-only. Shared
+    // primitive reused by the cards and commit-page modules.
     `.prov{color:#6b7280;font-size:0.875em}`,
-    // Filter chips: visually hidden but focusable radios + chip labels.
-    `input[name="filter"]{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;` +
-      `clip:rect(0 0 0 0);clip-path:inset(50%)}`,
-    `.filters{display:flex;flex-wrap:wrap;gap:0.375rem;margin:0 0 1.25rem}`,
-    `.filters label{cursor:pointer;color:#4b5563;font-size:0.8125rem;line-height:1.5;` +
-      `padding:0.25rem 0.75rem;border:1px solid #e5e7eb;border-radius:999px;background:#ffffff}`,
-    `.filters label:hover{color:#1f2937;border-color:#d1d5db;background:#f9fafb}`,
-    ...filterRules,
-    // Commit cards: a repo-card grid that reads as clickable (border +
-    // hover shadow); single column falls out naturally at 320px.
-    `.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem}`,
-    `.card{display:flex;flex-direction:column;gap:0.375rem;background:#ffffff;` +
-      `border:1px solid #e5e7eb;border-radius:10px;padding:1rem;color:inherit;text-decoration:none}`,
-    `.card:hover{border-color:#d1d5db;box-shadow:0 2px 8px rgba(17,24,39,0.08)}`,
-    `.card-meta{display:flex;align-items:center;gap:0.5rem;margin:0}`,
-    `.tag{font-size:0.6875rem;font-weight:600;line-height:1.7;padding:0 0.5rem;` +
-      `border-radius:999px;color:#4b5563;background:#f3f4f6;border:1px solid #e5e7eb}`,
-    `.tag-feature{color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe}`,
-    `code.card-sha{background:transparent;border:none;padding:0;color:#9ca3af;font-size:0.75rem}`,
-    `.card .card-title{font-size:0.9375rem;font-weight:600;letter-spacing:0;` +
-      `text-transform:none;color:#1f2937;margin:0}`,
-    `.card-summary{font-size:0.8125rem;color:#6b7280;margin:0}`,
-    `.card-chips{display:flex;flex-wrap:wrap;gap:0.25rem;margin:auto 0 0;padding-top:0.375rem}`,
-    `.chip{font-size:0.6875rem;line-height:1.7;color:#6b7280;border:1px solid #e5e7eb;` +
-      `border-radius:999px;padding:0 0.5rem}`,
     // Diagrams get room; overflow-x:auto keeps an oversized diagram
     // scrolling inside its own figure instead of widening the page at 320px.
     `figure.diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;` +
@@ -599,18 +566,19 @@ function stylesheet(presentTypes: readonly CommitType[]): string {
     // Housekeeping commits: quieter than regular evidence details.
     `details.housekeeping{border:none;border-radius:0;padding:0;margin:0.25rem 0 0}`,
     `details.housekeeping summary{font-size:0.8125rem}`,
-    // Under 736px the sidebar collapses to a horizontally scrollable tab
-    // row on top — the page itself never scrolls sideways at 320px.
-    `@media (max-width:735px){` +
+    // Under 736px the sidebar module collapses its <nav> to a horizontally
+    // scrollable tab row; the shell stacks the layout so the page itself
+    // never scrolls sideways at 320px. Breakpoint matches sidebarCss.
+    `@media (max-width:736px){` +
       `.layout{flex-direction:column}` +
-      `.sidebar{position:static;width:100%;max-height:none;overflow:visible;` +
-      `padding:1.5rem 1.25rem 0}` +
-      `.tabs{flex-direction:row;overflow-x:auto;gap:0.25rem;margin-top:1rem;` +
-      `padding-bottom:0.75rem}` +
-      `.tabs a{white-space:nowrap;flex-shrink:0}` +
-      `main{border-left:none;padding:1.5rem 1.25rem 3rem}` +
+      `main{padding:1.5rem 1.25rem 3rem}` +
       `}`
   ].join("\n");
+}
+
+/** The single stylesheet: shell + the three module CSS constants. */
+function stylesheet(): string {
+  return [shellCss(), sidebarCss, cardsCss, commitPageCss].join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -619,13 +587,13 @@ function stylesheet(presentTypes: readonly CommitType[]): string {
 
 const CSP_CONTENT = "default-src 'none'; style-src 'unsafe-inline'; img-src data:;";
 
-const TABS = [
-  { id: "home", label: "Home" },
-  { id: "overview", label: "Overview" },
-  { id: "architecture", label: "Architecture" },
-  { id: "how-it-works", label: "How it works" },
-  { id: "more", label: "More" }
-] as const;
+const TABS: readonly ViewTab[] = [
+  { id: "home", label: "Home", href: "#home" },
+  { id: "overview", label: "Overview", href: "#overview" },
+  { id: "architecture", label: "Architecture", href: "#architecture" },
+  { id: "how-it-works", label: "How it works", href: "#how-it-works" },
+  { id: "more", label: "More", href: "#more" }
+];
 
 /**
  * Render the change dashboard as one self-contained HTML document string.
@@ -638,30 +606,24 @@ export function renderChangeBook(
   options: RenderOptions = {}
 ): string {
   const meaningful = change.changeUnits.filter((unit) => !unit.grouped);
-  const presentTypes = COMMIT_TYPES.filter((type) =>
-    meaningful.some((unit) => commitType(unit.technicalTitle) === type)
-  );
 
   // Home is deliberately LAST: the pure-CSS default-view technique needs
-  // every other (targetable) section to precede it in document order.
+  // every other (targetable) section — views and commit pages alike — to
+  // precede it in document order. Commit-page roots come from module C
+  // already wrapped as <section class="cp-page" id="u{index}">.
+  const commitPages = meaningful
+    .map((unit, index) => commitPageSection(unit, index, change, options))
+    .join("");
   const sections =
     `<section id="overview">${overviewView(book, change, meaningful)}</section>` +
     `<section id="architecture">${architectureView(book, change, options)}</section>` +
     `<section id="how-it-works">${howItWorksView(change)}</section>` +
     `<section id="more">${moreView(book, change)}</section>` +
+    commitPages +
     `<section id="home">${homeView(meaningful, change)}</section>`;
-
-  const tabs = TABS.map(
-    (tab) => `<a href="#${tab.id}">${tab.label}</a>`
-  ).join("");
 
   const displayName = options.repoName ?? change.repository.name;
   const title = escHtml(`${displayName} — change book`);
-  const count = meaningful.length;
-  const subtitle =
-    `${count} change${count === 1 ? "" : "s"} · ` +
-    `<span class="rev">${escHtml(shortRev(change.baseRevision))}</span> → ` +
-    `<span class="rev">${escHtml(shortRev(change.headRevision))}</span>`;
 
   return (
     `<!doctype html>` +
@@ -671,19 +633,12 @@ export function renderChangeBook(
     `<meta http-equiv="Content-Security-Policy" content="${CSP_CONTENT}">` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<title>${title}</title>` +
-    `<style>${stylesheet(presentTypes)}</style>` +
+    `<style>${stylesheet()}</style>` +
     `</head>` +
     `<body>` +
     `<a class="skip-link" href="#main">Skip to content</a>` +
     `<div class="layout">` +
-    `<aside class="sidebar">` +
-    `<header class="masthead">` +
-    `<p class="masthead-kicker">Change book</p>` +
-    `<h1>${escHtml(displayName)}</h1>` +
-    `<p class="subtitle">${subtitle}</p>` +
-    `</header>` +
-    `<nav class="tabs" aria-label="Views">${tabs}</nav>` +
-    `</aside>` +
+    renderSidebar(TABS, "home", displayName) +
     `<main id="main">` +
     sections +
     `</main>` +

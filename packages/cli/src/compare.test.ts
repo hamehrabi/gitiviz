@@ -266,7 +266,7 @@ describe("repository display name resolution through the CLI", () => {
     expect(exitCode, io.errText()).toBe(0);
     expect(await repoNameIn(out)).toBe("env-name");
     const html = await readFile(join(out, "dist", "index.html"), "utf8");
-    expect(html).toContain("<h1>env-name</h1>");
+    expect(html).toContain('<p class="sb-wordmark">env-name</p>');
   }, 60_000);
 
   it("falls back to the origin remote's repo name (strips .git), then dir basename", async () => {

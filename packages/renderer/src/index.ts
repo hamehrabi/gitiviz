@@ -26,3 +26,16 @@ export {
   type RenderDiagram,
   type RenderOptions
 } from "./render.js";
+export {
+  CARD_CHIP_LABELS,
+  toCardModel,
+  toCommitPageModel,
+  unitAnchorId,
+  type CardChip,
+  type CardModel,
+  type CommitPageModel,
+  type ViewTab
+} from "./dashboardTypes.js";
+export { renderSidebar, sidebarCss } from "./sidebar.js";
+export { cardsCss, renderCardsGrid, renderFilterChips } from "./cards.js";
+export { commitPageCss, renderCommitPage } from "./commitPage.js";

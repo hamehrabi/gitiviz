@@ -93,7 +93,7 @@ describe("e2e: manifests", () => {
     // The temp checkout's directory is "gitiviz-e2e-…" (and "/repo" in the
     // plugin's Docker fallback) — the book must use the real project name.
     expect(change.repository.name).toBe(EXPECTED_REPO_NAME);
-    expect(html).toContain(`<h1>${EXPECTED_REPO_NAME}</h1>`);
+    expect(html).toContain(`<p class="sb-wordmark">${EXPECTED_REPO_NAME}</p>`);
     expect(html).toContain(`<title>${EXPECTED_REPO_NAME} — change book</title>`);
   });
 
@@ -134,18 +134,32 @@ describe("e2e: HTML dashboard structure", () => {
     expect(nav).not.toContain("fixup!");
     expect(nav).not.toContain("style: reformat orders routes");
     // One card per meaningful change, full subject as the card title.
-    expect(html.match(/class="card type-/g)).toHaveLength(2);
+    expect(html.match(/class="cd-card cd-type-/g)).toHaveLength(2);
     for (const subject of MEANINGFUL_SUBJECTS) {
       expect(html).toContain(subject);
     }
     // Type tags derive from the conventional-commit prefix.
-    expect(html).toContain(`>feature</span>`);
-    expect(html).toContain(`>housekeeping</span>`);
+    expect(html).toContain(`>Feature</span>`);
+    expect(html).toContain(`>Housekeeping</span>`);
     // The five view sections, home last (the CSS default-view technique).
     for (const id of ["overview", "architecture", "how-it-works", "more", "home"]) {
       expect(html).toContain(`<section id="${id}">`);
     }
-    expect(html).not.toContain(`class="card type-fixup`);
+    expect(html).not.toContain(`cd-type-fixup`);
+  });
+
+  it("gives every meaningful change its own :target page with a way back", () => {
+    // Cards link to per-commit pages; grouped commits get neither.
+    expect(html).toContain('href="#u0"');
+    expect(html).toContain('href="#u1"');
+    expect(html).not.toContain('href="#u2"');
+    expect(html.match(/<section class="cp-page" id="u\d+"/g)).toHaveLength(2);
+    for (const subject of MEANINGFUL_SUBJECTS) {
+      expect(html).toMatch(new RegExp(`<h2 class="cp-title"[^>]*>${subject}</h2>`));
+    }
+    // Each page carries the prominent back link; "#" clears the fragment so
+    // the home grid (the default view) returns.
+    expect(html.match(/<a class="cp-back-link" href="#">← All changes<\/a>/g)).toHaveLength(2);
   });
 
   it("keeps meaningful commits as timeline nodes and grouped ones collapsed as housekeeping", () => {

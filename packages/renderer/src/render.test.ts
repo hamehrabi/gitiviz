@@ -188,6 +188,19 @@ describe("renderChangeBook document shell", () => {
     }
   });
 
+  it("ships exactly one <style> concatenating shell + module CSS", () => {
+    const doc = parse(renderDemo());
+    const styles = doc.querySelectorAll("style");
+    expect(styles.length).toBe(1);
+    const css = styles[0]!.textContent;
+    // One marker rule from each contributor, in shell→sb→cd→cp order.
+    const order = [".layout{", ".sb-nav{", ".cd-grid{", ".cp-page{"].map((m) =>
+      css.indexOf(m)
+    );
+    for (const index of order) expect(index).toBeGreaterThanOrEqual(0);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
   it("stays byte-deterministic", () => {
     expect(renderDemo()).toBe(renderDemo());
   });
@@ -198,34 +211,23 @@ describe("renderChangeBook document shell", () => {
 // ---------------------------------------------------------------------------
 
 describe("sidebar", () => {
-  it("puts the wordmark masthead inside the sidebar", () => {
+  it("puts the repo wordmark at the top of the sidebar nav", () => {
     const doc = parse(renderDemo());
-    const sidebar = doc.querySelector("aside.sidebar");
+    const sidebar = doc.querySelector("nav.sb-nav");
     expect(sidebar).not.toBeNull();
-    const header = sidebar!.querySelector("header.masthead");
-    expect(header).not.toBeNull();
-    expect(header!.querySelector(".masthead-kicker")!.textContent).toBe("Change book");
-    expect(header!.querySelector("h1")!.textContent).toBe("demo-app");
-    const subtitle = header!.querySelector(".subtitle")!;
-    expect(subtitle.textContent).toContain("2 changes");
-    expect(subtitle.textContent).toContain("aaaaaaaaaa → bbbbbbbbbb");
+    const wordmark = sidebar!.querySelector(".sb-wordmark");
+    expect(wordmark).not.toBeNull();
+    expect(wordmark!.textContent).toBe("demo-app");
+    // Wordmark precedes the tab list.
+    expect(sidebar!.firstElementChild).toBe(wordmark);
   });
 
-  it("renders the shortened SHAs as secondary .rev spans, never raw 40-char SHAs", () => {
-    const doc = parse(renderDemo());
-    const revs = doc.querySelectorAll("header .subtitle .rev");
-    expect(revs.length).toBe(2);
-    expect(revs[0]!.textContent).toBe("aaaaaaaaaa");
-    expect(revs[1]!.textContent).toBe("bbbbbbbbbb");
-    expect(doc.querySelector("header")!.textContent).not.toContain("a".repeat(40));
-  });
-
-  it("prefers the repoName option for the display name and document title", () => {
+  it("prefers the repoName option for the wordmark and document title", () => {
     const change = demoChange();
     const doc = parse(
       renderChangeBook(demoBook(change), change, { repoName: "Demo App" })
     );
-    expect(doc.querySelector("header h1")!.textContent).toBe("Demo App");
+    expect(doc.querySelector(".sb-wordmark")!.textContent).toBe("Demo App");
     expect(doc.querySelector("title")!.textContent).toBe("Demo App — change book");
   });
 
@@ -240,21 +242,20 @@ describe("sidebar", () => {
 
   it("is sticky on wide screens and collapses to a scrollable tab row under 736px", () => {
     const css = styleOf(renderDemo());
-    expect(css).toMatch(/\.sidebar\{[^}]*position:sticky/);
-    expect(css).toContain("@media (max-width:735px)");
-    const collapsed = css.slice(css.indexOf("@media (max-width:735px)"));
-    expect(collapsed).toMatch(/\.tabs\{[^}]*overflow-x:auto/);
-    expect(collapsed).toMatch(/\.sidebar\{[^}]*position:static/);
+    expect(css).toMatch(/\.sb-nav\{[^}]*position:sticky/);
+    expect(css).toContain("@media (max-width:736px)");
+    const collapsed = css.slice(css.indexOf("@media (max-width:736px)"));
+    expect(collapsed).toMatch(/\.sb-tabs\{[^}]*overflow-x:auto/);
   });
 });
 
 describe("tab navigation", () => {
   it("renders the five view tabs, in order, as plain anchors", () => {
     const doc = parse(renderDemo());
-    const nav = doc.querySelector("nav.tabs");
+    const nav = doc.querySelector("nav.sb-nav");
     expect(nav).not.toBeNull();
     expect(nav!.getAttribute("aria-label")).toBeTruthy();
-    const tabs = Array.from(nav!.querySelectorAll("a"));
+    const tabs = Array.from(nav!.querySelectorAll("a.sb-tab"));
     expect(tabs.map((a) => a.getAttribute("href"))).toEqual(TAB_HREFS);
     expect(tabs.map((a) => a.textContent)).toEqual([
       "Home",
@@ -267,7 +268,7 @@ describe("tab navigation", () => {
 
   it("points every tab at a real section id", () => {
     const doc = parse(renderDemo());
-    for (const a of Array.from(doc.querySelectorAll("nav.tabs a"))) {
+    for (const a of Array.from(doc.querySelectorAll("nav.sb-nav a.sb-tab"))) {
       const target = doc.getElementById(a.getAttribute("href")!.slice(1));
       expect(target, `dangling tab ${a.getAttribute("href")}`).not.toBeNull();
       expect(target!.tagName.toLowerCase()).toBe("section");
@@ -291,15 +292,24 @@ describe("tab navigation", () => {
     expect(sections[sections.length - 1]!.getAttribute("id")).toBe("home");
   });
 
-  it("marks the current tab active: home by default, :has-based otherwise", () => {
+  it("marks the Home tab active by default (class + aria-current)", () => {
+    const doc = parse(renderDemo());
+    const activeItems = doc.querySelectorAll(".sb-item-active");
+    expect(activeItems.length).toBe(1);
+    const anchor = activeItems[0]!.querySelector("a.sb-tab")!;
+    expect(anchor.getAttribute("href")).toBe("#home");
+    expect(anchor.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("moves the active-tab highlight with :has when another view is targeted", () => {
     const css = styleOf(renderDemo());
-    expect(css).toMatch(/\.tabs a\[href="#home"\]\{[^}]*background:#eff6ff/);
     // Progressive enhancement: browsers without :has simply keep Home lit.
     expect(css).toContain(
-      'body:has(#overview:target,#architecture:target,#how-it-works:target,#more:target) .tabs a[href="#home"]'
+      "body:has(#overview:target,#architecture:target,#how-it-works:target,#more:target) " +
+        ".sb-item-active .sb-tab"
     );
     for (const id of ["overview", "architecture", "how-it-works", "more"]) {
-      expect(css).toContain(`body:has(#${id}:target) .tabs a[href="#${id}"]`);
+      expect(css).toContain(`body:has(#${id}:target) .sb-tabs a[href="#${id}"]`);
     }
   });
 });
@@ -311,14 +321,23 @@ describe("tab navigation", () => {
 describe("home cards grid", () => {
   it("renders one card per meaningful change unit; grouped commits get none", () => {
     const doc = parse(renderDemo());
-    const cards = doc.querySelectorAll("#home .grid .card");
+    const cards = doc.querySelectorAll("#home .cd-grid .cd-card");
     expect(cards.length).toBe(2);
     expect(doc.querySelector("#home")!.textContent).not.toContain("fixup!");
   });
 
+  it("summarizes the comparison in the home view head", () => {
+    const doc = parse(renderDemo());
+    const sub = doc.querySelector("#home .view-sub")!;
+    expect(sub.textContent).toContain("2 meaningful changes");
+    expect(sub.textContent).toContain("aaaaaaaaaa");
+    expect(sub.textContent).toContain("bbbbbbbbbb");
+    expect(doc.querySelector("#home")!.textContent).not.toContain("a".repeat(40));
+  });
+
   it("shows the narrated human title, falling back to the technical title", () => {
     const doc = parse(renderDemo());
-    const titles = Array.from(doc.querySelectorAll("#home .card .card-title")).map(
+    const titles = Array.from(doc.querySelectorAll("#home .cd-card .cd-title")).map(
       (t) => t.textContent.trim()
     );
     expect(titles).toEqual([
@@ -329,30 +348,30 @@ describe("home cards grid", () => {
 
   it("shows a one-line summary when narrated, and the short sha", () => {
     const doc = parse(renderDemo());
-    const cards = Array.from(doc.querySelectorAll("#home .card"));
-    expect(cards[0]!.querySelector(".card-summary")!.textContent).toBe(
+    const cards = Array.from(doc.querySelectorAll("#home .cd-card"));
+    expect(cards[0]!.querySelector(".cd-summary")!.textContent).toBe(
       "Adds a POST /orders route with validation."
     );
-    expect(cards[1]!.querySelector(".card-summary")).toBeNull();
-    expect(cards[0]!.querySelector("code.card-sha")!.textContent).toBe("ccccccc");
-    expect(cards[1]!.querySelector("code.card-sha")!.textContent).toBe("ddddddd");
+    expect(cards[1]!.querySelector(".cd-summary")).toBeNull();
+    expect(cards[0]!.querySelector("code.cd-sha")!.textContent).toBe("ccccccc");
+    expect(cards[1]!.querySelector("code.cd-sha")!.textContent).toBe("ddddddd");
   });
 
   it("derives the type tag from the conventional-commit prefix", () => {
     const doc = parse(renderDemo());
-    const cards = Array.from(doc.querySelectorAll("#home .card"));
-    expect(cards[0]!.querySelector(".tag")!.textContent).toBe("feature");
-    expect(cards[0]!.getAttribute("class")).toContain("type-feature");
+    const cards = Array.from(doc.querySelectorAll("#home .cd-card"));
+    expect(cards[0]!.querySelector(".cd-tag")!.textContent).toBe("Feature");
+    expect(cards[0]!.getAttribute("class")).toContain("cd-type-feature");
     // refactor: falls into the housekeeping bucket.
-    expect(cards[1]!.querySelector(".tag")!.textContent).toBe("housekeeping");
-    expect(cards[1]!.getAttribute("class")).toContain("type-housekeeping");
+    expect(cards[1]!.querySelector(".cd-tag")!.textContent).toBe("Housekeeping");
+    expect(cards[1]!.getAttribute("class")).toContain("cd-type-housekeeping");
   });
 
   it("shows affected-chapter chips derived from what the unit touches", () => {
     const doc = parse(renderDemo());
-    const cards = Array.from(doc.querySelectorAll("#home .card"));
+    const cards = Array.from(doc.querySelectorAll("#home .cd-card"));
     const chipTexts = cards.map((card) =>
-      Array.from(card.querySelectorAll(".chip")).map((c) => c.textContent)
+      Array.from(card.querySelectorAll(".cd-chapter")).map((c) => c.textContent)
     );
     // unit-1 touches entities (systems), a relationship (flows), a route
     // (contracts); unit-2 touches only a module entity.
@@ -363,7 +382,7 @@ describe("home cards grid", () => {
     const change = demoChange();
     change.changeUnits[0]!.provenance = "inferred";
     const doc = parse(renderChangeBook(demoBook(change), change));
-    const card = doc.querySelector("#home .card")!;
+    const card = doc.querySelector("#home .cd-card")!;
     const prov = card.querySelector(".prov");
     expect(prov).not.toBeNull();
     expect(prov!.textContent).toBe("◇");
@@ -375,8 +394,8 @@ describe("home cards grid", () => {
     change.changeUnits = change.changeUnits.filter((u) => u.grouped);
     const doc = parse(renderChangeBook(demoBook(change), change));
     const home = doc.querySelector("#home")!;
-    expect(home.querySelectorAll(".card").length).toBe(0);
-    expect(home.querySelectorAll('input[name="filter"]').length).toBe(0);
+    expect(home.querySelectorAll(".cd-card").length).toBe(0);
+    expect(home.querySelectorAll('input[name="cd-filter"]').length).toBe(0);
     expect(home.textContent).toContain("No meaningful changes");
   });
 });
@@ -388,10 +407,10 @@ describe("home cards grid", () => {
 describe("filter chips (scriptless)", () => {
   it('offers "All" plus exactly the commit types present', () => {
     const doc = parse(renderDemo());
-    const labels = Array.from(doc.querySelectorAll("#home .filters label")).map(
+    const labels = Array.from(doc.querySelectorAll("#home .cd-filters label")).map(
       (l) => l.textContent
     );
-    expect(labels).toEqual(["All", "feature", "housekeeping"]);
+    expect(labels).toEqual(["All", "Feature", "Housekeeping"]);
   });
 
   it("uses radio inputs preceding the grid so sibling selectors can filter", () => {
@@ -400,31 +419,34 @@ describe("filter chips (scriptless)", () => {
     const children = Array.from(home.children);
     const radios = children.filter((el) => el.tagName.toLowerCase() === "input");
     expect(radios.map((r) => r.getAttribute("id"))).toEqual([
-      "f-all",
-      "f-feature",
-      "f-housekeeping"
+      "cd-filter-all",
+      "cd-filter-feature",
+      "cd-filter-housekeeping"
     ]);
     for (const radio of radios) {
       expect(radio.getAttribute("type")).toBe("radio");
-      expect(radio.getAttribute("name")).toBe("filter");
+      expect(radio.getAttribute("name")).toBe("cd-filter");
     }
     expect(
       radios.filter((r) => r.hasAttribute("checked")).map((r) => r.getAttribute("id"))
-    ).toEqual(["f-all"]);
-    // Document order: radios, then chips, then the grid — the CSS depends on it.
+    ).toEqual(["cd-filter-all"]);
+    // Document order: radios, then chips, then the grid — all siblings under
+    // the same parent. The `~` selectors in cardsCss depend on it.
     const kinds = children.map((el) =>
-      el.tagName.toLowerCase() === "input" ? "input" : el.getAttribute("class") ?? ""
+      el.tagName.toLowerCase() === "input"
+        ? "input"
+        : (el.getAttribute("class") ?? "").split(" ")[0]!
     );
-    expect(kinds.lastIndexOf("input")).toBeLessThan(kinds.indexOf("filters"));
-    expect(kinds.indexOf("filters")).toBeLessThan(kinds.indexOf("grid"));
+    expect(kinds.lastIndexOf("input")).toBeLessThan(kinds.indexOf("cd-filters"));
+    expect(kinds.indexOf("cd-filters")).toBeLessThan(kinds.indexOf("cd-grid"));
   });
 
   it("binds every chip label to a real filter radio", () => {
     const doc = parse(renderDemo());
-    for (const label of Array.from(doc.querySelectorAll("#home .filters label"))) {
+    for (const label of Array.from(doc.querySelectorAll("#home .cd-filters label"))) {
       const target = doc.getElementById(label.getAttribute("for")!);
       expect(target).not.toBeNull();
-      expect(target!.getAttribute("name")).toBe("filter");
+      expect(target!.getAttribute("name")).toBe("cd-filter");
     }
   });
 
@@ -432,19 +454,158 @@ describe("filter chips (scriptless)", () => {
     const css = styleOf(renderDemo());
     for (const type of ["feature", "housekeeping"]) {
       expect(css).toContain(
-        `#f-${type}:checked~.grid .card:not(.type-${type}){display:none}`
+        `#cd-filter-${type}:checked~.cd-grid .cd-card:not(.cd-type-${type}){display:none}`
       );
     }
     // No hide rule for All — everything stays visible.
-    expect(css).not.toContain("#f-all:checked~.grid");
+    expect(css).not.toContain("#cd-filter-all:checked~.cd-grid");
   });
 
   it("gives the checked chip an active state and a focus ring", () => {
     const css = styleOf(renderDemo());
-    for (const id of ["f-all", "f-feature", "f-housekeeping"]) {
-      expect(css).toContain(`#${id}:checked~.filters label[for="${id}"]`);
-      expect(css).toContain(`#${id}:focus-visible~.filters label[for="${id}"]{outline:`);
+    for (const id of ["cd-filter-all", "cd-filter-feature", "cd-filter-housekeeping"]) {
+      expect(css).toContain(`#${id}:checked~.cd-filters .cd-chip[for="${id}"]`);
+      expect(css).toContain(
+        `#${id}:focus-visible~.cd-filters .cd-chip[for="${id}"]{outline:`
+      );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit pages (:target navigation)
+// ---------------------------------------------------------------------------
+
+describe("commit pages (:target navigation)", () => {
+  it("renders every card as an anchor onto that commit's own page", () => {
+    const doc = parse(renderDemo());
+    const cards = Array.from(doc.querySelectorAll("#home .cd-grid a.cd-card"));
+    expect(cards.length).toBe(2);
+    expect(cards.map((c) => c.getAttribute("href"))).toEqual(["#u0", "#u1"]);
+    for (const card of cards) {
+      const target = doc.getElementById(card.getAttribute("href")!.slice(1));
+      expect(target).not.toBeNull();
+      expect(target!.getAttribute("class")).toBe("cp-page");
+      // Clickability affordance: the arrow glyph, hidden from readers.
+      const arrow = card.querySelector(".cd-arrow");
+      expect(arrow).not.toBeNull();
+      expect(arrow!.getAttribute("aria-hidden")).toBe("true");
+    }
+  });
+
+  it("renders one commit page per meaningful unit; grouped commits get none", () => {
+    const doc = parse(renderDemo());
+    expect(doc.querySelectorAll("main > section.cp-page").length).toBe(2);
+    const headings = Array.from(
+      doc.querySelectorAll("section.cp-page h2.cp-title")
+    ).map((h) => h.textContent);
+    expect(headings).toEqual([
+      "Guests can now check out",
+      "refactor: rename order helpers"
+    ]);
+  });
+
+  it("reveals exactly one commit page via :target and hides home meanwhile", () => {
+    const css = styleOf(renderDemo());
+    // Same generic rules as the tabs: hidden by default, shown on :target,
+    // home (the last section) hidden by the sibling rule.
+    expect(css).toContain("main>section{display:none");
+    expect(css).toContain("main>section:target{display:block}");
+    expect(css).toContain("main>section:target~#home{display:none}");
+    const doc = parse(renderDemo());
+    const sections = Array.from(doc.querySelectorAll("main > section"));
+    expect(sections[sections.length - 1]!.getAttribute("id")).toBe("home");
+    // Commit pages precede home so the sibling rule reaches it.
+    for (const page of Array.from(doc.querySelectorAll("section.cp-page"))) {
+      expect(sections.indexOf(page as (typeof sections)[number])).toBeLessThan(
+        sections.length - 1
+      );
+    }
+  });
+
+  it("orders the page: meta, title, purpose, before/after, diagram, unchanged, back, evidence", () => {
+    const doc = parse(renderDemo());
+    const page = doc.getElementById("u0")!;
+    const kinds = Array.from(page.children).map(
+      (el) => `${el.tagName.toLowerCase()}.${(el.getAttribute("class") ?? "").split(" ")[0]}`
+    );
+    expect(kinds).toEqual([
+      "p.cp-meta",
+      "h2.cp-title",
+      "p.cp-purpose",
+      "dl.cp-beforeafter",
+      "figure.cp-diagram",
+      "details.cp-unchanged",
+      "p.cp-back",
+      "details.cp-evidence"
+    ]);
+  });
+
+  it("keeps the cognitive-load budget: at most 8 elements before folds", () => {
+    const doc = parse(renderDemo());
+    for (const page of Array.from(doc.querySelectorAll("section.cp-page"))) {
+      expect(page.children.length).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it("shows before and after as short labeled rows", () => {
+    const doc = parse(renderDemo());
+    const rows = Array.from(doc.querySelectorAll("#u0 .cp-beforeafter .cp-row"));
+    const labeled = rows.map((row) => [
+      row.querySelector("dt")!.textContent,
+      row.querySelector("dd")!.textContent
+    ]);
+    expect(labeled).toEqual([
+      ["Before", "Only registered users could order."],
+      ["After", "Guests can place orders too."]
+    ]);
+  });
+
+  it("puts the one-sentence purpose (user impact first) right under the title", () => {
+    const doc = parse(renderDemo());
+    const purpose = doc.querySelector("#u0 .cp-purpose")!;
+    expect(purpose.textContent).toBe("Guests no longer need an account.");
+  });
+
+  it("collapses what stayed unchanged to a one-line count", () => {
+    const doc = parse(renderDemo());
+    const unchanged = doc.querySelector("#u0 details.cp-unchanged")!;
+    expect(unchanged.hasAttribute("open")).toBe(false);
+    expect(unchanged.querySelector("summary")!.textContent).toBe(
+      "Unchanged: 1 component"
+    );
+  });
+
+  it("offers a prominent back link that clears the fragment (browser Back works too)", () => {
+    const doc = parse(renderDemo());
+    const backs = Array.from(doc.querySelectorAll("section.cp-page a.cp-back-link"));
+    expect(backs.length).toBe(2);
+    for (const back of backs) {
+      // "#" un-targets the page, so Home — the default view — returns.
+      expect(back.getAttribute("href")).toBe("#");
+      expect(back.textContent).toBe("← All changes");
+    }
+  });
+
+  it("keeps technical evidence collapsed at the very bottom", () => {
+    const doc = parse(renderDemo());
+    const page = doc.getElementById("u0")!;
+    const last = page.lastElementChild!;
+    expect(last.tagName.toLowerCase()).toBe("details");
+    expect(last.hasAttribute("open")).toBe(false);
+    expect(last.querySelector("summary")!.textContent).toBe("Technical evidence");
+    expect(last.textContent).toContain("feat: add guest checkout route");
+    expect(last.textContent).toContain("src/routes/orders.ts");
+  });
+
+  it("marks narrated page titles with the ◇ provenance glyph", () => {
+    const change = demoChange();
+    change.changeUnits[0]!.provenance = "inferred";
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const mark = doc.querySelector("#u0 h2.cp-title .prov");
+    expect(mark).not.toBeNull();
+    expect(mark!.textContent).toBe("◇");
+    expect(mark!.getAttribute("title")).toContain("AI interpretation");
   });
 });
 
@@ -587,7 +748,7 @@ describe("more view", () => {
 describe("provenance markers", () => {
   it("marks derived evidence anchors with a ✓ glyph plus a title explanation", () => {
     const doc = parse(renderDemo());
-    const marks = doc.querySelectorAll("ul.evidence .prov");
+    const marks = doc.querySelectorAll("ul.evidence .prov, .cp-ev-list .prov");
     expect(marks.length).toBeGreaterThan(0);
     for (const mark of Array.from(marks)) {
       expect(mark.textContent).toBe("✓");
@@ -612,7 +773,7 @@ describe("provenance markers", () => {
 // ---------------------------------------------------------------------------
 
 describe("diagram insertion point", () => {
-  it("invokes the renderDiagram callback for the architecture view", () => {
+  it("invokes the renderDiagram callback for the architecture view and commit pages", () => {
     const requests: DiagramRequest[] = [];
     const html = renderDemo({
       renderDiagram: (req) => {
@@ -623,19 +784,31 @@ describe("diagram insertion point", () => {
     const context = requests.filter((r) => r.kind === "context");
     expect(context.length).toBe(1);
     expect(context[0]!.entities.length).toBe(3);
+    // One before→after projection per commit page, scoped to the unit.
+    const changes = requests.filter((r) => r.kind === "change");
+    expect(changes.length).toBe(2);
+    const changeReq = changes.find((r) => r.changeUnit?.id === "unit-1")!;
+    expect(changeReq.entities.map((e) => e.id).sort()).toEqual(["ent-route", "ent-service"]);
+    expect(changeReq.relationships.map((r) => r.id)).toEqual(["rel-1"]);
     expect(html).toContain('aria-label="diagram"');
+    // The commit-page figure carries the SVG verbatim.
+    const doc = parse(html);
+    expect(doc.querySelectorAll("figure.cp-diagram svg").length).toBe(2);
   });
 
-  it("renders a placeholder figure when no diagram renderer is supplied", () => {
+  it("renders quiet placeholders when no diagram renderer is supplied", () => {
     const doc = parse(renderDemo());
-    const placeholders = doc.querySelectorAll("figure.diagram-placeholder");
-    expect(placeholders.length).toBeGreaterThan(0);
+    // Architecture view placeholder…
+    expect(doc.querySelectorAll("figure.diagram-placeholder").length).toBeGreaterThan(0);
+    // …and one per commit page.
+    expect(doc.querySelectorAll("figure.cp-diagram .cp-no-diagram").length).toBe(2);
     expect(doc.querySelectorAll("svg").length).toBe(0);
   });
 
-  it("renders a placeholder when the callback declines with null", () => {
+  it("renders placeholders when the callback declines with null", () => {
     const doc = parse(renderDemo({ renderDiagram: () => null }));
     expect(doc.querySelectorAll("figure.diagram-placeholder").length).toBeGreaterThan(0);
+    expect(doc.querySelectorAll("figure.cp-diagram .cp-no-diagram").length).toBe(2);
   });
 });
 

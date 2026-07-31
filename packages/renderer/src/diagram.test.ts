@@ -476,8 +476,11 @@ describe("compileDiagram", () => {
     const window = new Window();
     const doc = new window.DOMParser().parseFromString(html, "text/html");
     expect(doc.querySelectorAll("script").length).toBe(0);
-    // The architecture view compiles the context diagram.
+    // The architecture view compiles the context diagram; each commit page
+    // compiles its before→after change diagram.
     expect(doc.querySelectorAll("figure.diagram svg").length).toBeGreaterThanOrEqual(1);
+    expect(doc.querySelectorAll("figure.cp-diagram svg").length).toBe(1);
     expect(doc.querySelectorAll("figure.diagram-placeholder").length).toBe(0);
+    expect(doc.querySelectorAll(".cp-no-diagram").length).toBe(0);
   });
 });

@@ -110,7 +110,8 @@ function css(html: string): string {
 /** Selectors of every CSS rule whose declarations contain `decl`. */
 function selectorsWith(stylesheet: string, decl: string): string[] {
   const out: string[] = [];
-  for (const match of stylesheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+  const noComments = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const match of noComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     if (match[2]!.includes(decl)) out.push(match[1]!.trim());
   }
   return out;
@@ -127,19 +128,24 @@ describe("native interactive controls", () => {
       expect(el.hasAttribute("tabindex")).toBe(false);
       const role = el.getAttribute("role");
       if (role !== null) {
-        // The only role in the document is the diagram image role on <svg>.
-        expect(role).toBe("img");
-        expect(el.tagName.toLowerCase()).toBe("svg");
+        // The only roles in the document: the diagram image role on <svg>
+        // and the grouping role on the filter-chip row.
+        if (role === "img") {
+          expect(el.tagName.toLowerCase()).toBe("svg");
+        } else {
+          expect(role).toBe("group");
+          expect(el.getAttribute("class")).toBe("cd-filters");
+        }
       }
     }
     // Nothing dressed up as a button/link via div or span.
-    expect(doc.querySelectorAll("div[role],span[role]").length).toBe(0);
+    expect(doc.querySelectorAll("span[role]").length).toBe(0);
     expect(doc.querySelectorAll("button").length).toBe(0);
   });
 
   it("tab navigation is plain anchors with non-empty names and real targets", () => {
     const doc = parse(render());
-    const tabs = Array.from(doc.querySelectorAll("nav.tabs a"));
+    const tabs = Array.from(doc.querySelectorAll("nav.sb-nav a.sb-tab"));
     expect(tabs.length).toBe(5);
     for (const tab of tabs) {
       expect(tab.textContent.trim().length).toBeGreaterThan(0);
@@ -149,10 +155,31 @@ describe("native interactive controls", () => {
     }
   });
 
+  it("commit cards and back links are plain anchors with real fragment targets", () => {
+    const doc = parse(render());
+    const cards = Array.from(doc.querySelectorAll("a.cd-card"));
+    expect(cards.length).toBeGreaterThan(0);
+    const backs = Array.from(doc.querySelectorAll("a.cp-back-link"));
+    expect(backs.length).toBe(cards.length);
+    for (const card of cards) {
+      const href = card.getAttribute("href")!;
+      expect(href.startsWith("#")).toBe(true);
+      expect(doc.getElementById(href.slice(1))).not.toBeNull();
+      expect(card.textContent.trim().length).toBeGreaterThan(0);
+    }
+    for (const back of backs) {
+      // "#" clears the fragment: it un-targets the commit page, so Home —
+      // the :target-less default — returns. A real navigation, so browser
+      // Back still works.
+      expect(back.getAttribute("href")).toBe("#");
+      expect(back.textContent.trim().length).toBeGreaterThan(0);
+    }
+  });
+
   it("labels every filter radio (accessible name comes from the chip)", () => {
     const doc = parse(render());
     const radios = Array.from(
-      doc.querySelectorAll('input[type="radio"][name="filter"]')
+      doc.querySelectorAll('input[type="radio"][name="cd-filter"]')
     );
     expect(radios.length).toBeGreaterThan(0);
     for (const radio of radios) {
@@ -166,7 +193,7 @@ describe("native interactive controls", () => {
   it("hides the filter radios accessibly — clipped, never display:none", () => {
     const style = css(render());
     const rules = selectorsWith(style, "clip-path:inset(50%)");
-    expect(rules).toContain('input[name="filter"]');
+    expect(rules).toContain(".cd-filter-input");
     for (const selector of selectorsWith(style, "display:none")) {
       expect(selector).not.toContain("input");
     }
@@ -200,11 +227,11 @@ describe("native interactive controls", () => {
     expect(style).toMatch(/a:focus-visible\{outline:/);
     const doc = parse(render());
     for (const radio of Array.from(
-      doc.querySelectorAll('input[type="radio"][name="filter"]')
+      doc.querySelectorAll('input[type="radio"][name="cd-filter"]')
     )) {
       const id = radio.getAttribute("id")!;
       expect(style).toContain(
-        `#${id}:focus-visible~.filters label[for="${id}"]{outline:`
+        `#${id}:focus-visible~.cd-filters .cd-chip[for="${id}"]{outline:`
       );
     }
   });
@@ -220,13 +247,14 @@ describe("landmarks and skip link", () => {
     expect(doc.documentElement.getAttribute("lang")).toBe("en");
   });
 
-  it("has exactly one header, one labelled nav, and one main landmark", () => {
+  it("has exactly one labelled nav and one main landmark", () => {
     const doc = parse(render());
-    expect(doc.querySelectorAll("header").length).toBe(1);
     expect(doc.querySelectorAll("main").length).toBe(1);
     const navs = doc.querySelectorAll("nav");
     expect(navs.length).toBe(1);
     expect(navs[0]!.getAttribute("aria-label")).toBeTruthy();
+    // The repo wordmark lives at the top of the sidebar nav.
+    expect(navs[0]!.querySelector(".sb-wordmark")).not.toBeNull();
   });
 
   it("starts the body with a skip link that targets main", () => {
@@ -256,7 +284,7 @@ describe("landmarks and skip link", () => {
     const doc = parse(render());
     const body = doc.body;
     const sidebarIndex = Array.from(body.querySelectorAll("*")).findIndex(
-      (el) => el.getAttribute("class") === "sidebar"
+      (el) => el.getAttribute("class") === "sb-nav"
     );
     const mainIndex = Array.from(body.querySelectorAll("*")).findIndex(
       (el) => el.tagName.toLowerCase() === "main"
@@ -290,10 +318,10 @@ describe("small-screen hardening (CSS-rule level; visual check manual)", () => {
 
   it("collapses the sidebar to a horizontally scrollable tab row under 736px", () => {
     const style = css(render());
-    expect(style).toContain("@media (max-width:735px)");
-    const collapsed = style.slice(style.indexOf("@media (max-width:735px)"));
-    expect(collapsed).toMatch(/\.tabs\{[^}]*overflow-x:auto/);
+    expect(style).toContain("@media (max-width:736px)");
+    const collapsed = style.slice(style.indexOf("@media (max-width:736px)"));
     expect(collapsed).toMatch(/\.layout\{[^}]*flex-direction:column/);
+    expect(collapsed).toMatch(/\.sb-tabs\{[^}]*overflow-x:auto/);
   });
 
   it("scales diagrams down and lets oversized ones scroll inside their figure", () => {
