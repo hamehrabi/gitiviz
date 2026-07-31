@@ -123,25 +123,29 @@ describe("e2e: manifests", () => {
   });
 });
 
-describe("e2e: HTML book structure", () => {
-  it("has a nav chapter per meaningful change; grouped commits are not chapters", () => {
+describe("e2e: HTML dashboard structure", () => {
+  it("has a home card per meaningful change; grouped commits get no card", () => {
+    // Sidebar tab nav: the five views, no per-commit tabs.
     const nav = html.match(/<nav[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? "";
     expect(nav).not.toBe("");
-    // Nav labels are short controls: numbered and truncated on a word
-    // boundary. The full subject stays as the chapter heading.
-    expect(nav).toContain("1 · feat: add guest checkout route…");
-    expect(nav).toContain("2 · refactor: rename order service…");
-    for (const subject of MEANINGFUL_SUBJECTS) {
-      expect(html).toContain(`<h2>${subject}</h2>`);
+    for (const tab of ["#home", "#overview", "#architecture", "#how-it-works", "#more"]) {
+      expect(nav).toContain(`href="${tab}"`);
     }
-    // Grouped in two labelled clusters.
-    expect(nav).toContain("This change");
-    expect(nav).toContain("The book");
     expect(nav).not.toContain("fixup!");
     expect(nav).not.toContain("style: reformat orders routes");
-    // Overview + 2 meaningful changes + the ten canonical book chapters.
-    expect(html.match(/<label for="c\d+">/g)).toHaveLength(13);
-    expect(html.match(/<section id="p\d+">/g)).toHaveLength(13);
+    // One card per meaningful change, full subject as the card title.
+    expect(html.match(/class="card type-/g)).toHaveLength(2);
+    for (const subject of MEANINGFUL_SUBJECTS) {
+      expect(html).toContain(subject);
+    }
+    // Type tags derive from the conventional-commit prefix.
+    expect(html).toContain(`>feature</span>`);
+    expect(html).toContain(`>housekeeping</span>`);
+    // The five view sections, home last (the CSS default-view technique).
+    for (const id of ["overview", "architecture", "how-it-works", "more", "home"]) {
+      expect(html).toContain(`<section id="${id}">`);
+    }
+    expect(html).not.toContain(`class="card type-fixup`);
   });
 
   it("keeps meaningful commits as timeline nodes and grouped ones collapsed as housekeeping", () => {
@@ -196,6 +200,7 @@ describe("e2e: honest provenance labeling", () => {
     expect(await runCli(["apply-narration", "--out", out], applyIo), applyIo.errText()).toBe(0);
     const narratedHtml = await readFile(join(out, "dist", "index.html"), "utf8");
     expect(narratedHtml).toContain("Guests can now check out");
-    expect(narratedHtml).toContain("◇ AI interpretation");
+    expect(narratedHtml).toContain("◇");
+    expect(narratedHtml).toContain("AI interpretation");
   }, 60_000);
 });

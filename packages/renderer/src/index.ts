@@ -19,7 +19,9 @@ export {
   type Point
 } from "./layout.js";
 export {
+  commitType,
   renderChangeBook,
+  type CommitType,
   type DiagramRequest,
   type RenderDiagram,
   type RenderOptions

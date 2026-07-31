@@ -140,13 +140,32 @@ validator makes it impossible for AI output to claim `derived`.
 
 ## Reader experience
 
-1. One screen, one chapter. Chapter selector + Previous/Next. Nothing else.
-2. Branch view opens first: branch name, base/merge-base, plain-language
-   outcome sentence, count of meaningful changes, affected book chapters,
-   small commit timeline.
-3. Each change chapter: one sentence of human outcome; a small before→after
-   diagram (5–12 entities, max 5 nodes horizontally, verb on every arrow);
-   an explicit "what stayed unchanged" list.
+**Dashboard model (user-mandated, 2026-07-31 — supersedes the earlier
+"one screen, one chapter" linear book):** a light dashboard with a
+persistent left sidebar nav, not a linear book.
+
+1. Left sidebar (sticky): repo wordmark on top, then vertical view tabs —
+   **Home** (default: the commit cards grid), **Overview** (what the repo
+   is + brief summary), **Architecture** (systems diagram), **How it
+   works** (runtime flows / how value moves), **More** (remaining book
+   chapters as folded sections). The tabs regroup the existing ten-chapter
+   projections; clear active state on the current tab. Under ~736px the
+   sidebar collapses to a horizontally scrollable tab row on top — no
+   horizontal page overflow at 320px.
+2. Home: a cards grid, one card per change unit — narrated humanTitle
+   (technicalTitle fallback), one-line summary, short sha, a type tag
+   (feature/fix/docs/test/housekeeping from the conventional-commit
+   prefix), affected-chapter chips. Cards read as clickable (border, hover
+   shadow, arrow affordance). Above the grid: CSS-only filter chips (radio
+   inputs + sibling selectors) — "All" plus the types present.
+3. Each card opens that commit's own page via anchor + `:target` (real URL
+   fragments, so browser Back works; home is the default when nothing is
+   targeted). Commit page, in order: human title; one sentence of purpose;
+   Before and After as two short labeled rows; the before→after diagram
+   (5–12 entities, max 5 nodes horizontally, verb on every arrow); "what
+   stayed unchanged" as a one-line collapsed count; a prominent "← All
+   changes" link; technical evidence collapsed at the bottom. Ruthless
+   cognitive-load budget: max ~8 visible elements before folds.
 
 **Diagram-first requirement (user-mandated):** diagrams are the dominant
 content of every chapter, not illustrations of the text — words and code both

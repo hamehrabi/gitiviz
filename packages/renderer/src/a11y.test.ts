@@ -1,13 +1,14 @@
 /**
- * Task 16 — responsiveness + accessibility hardening of the rendered book.
+ * Responsiveness + accessibility hardening of the rendered dashboard.
  *
  * What this file pins down (from the plan + design doc):
- *   - Every interactive control is a native element (radio/label/anchor/
+ *   - Every interactive control is a native element (anchor/radio/label/
  *     summary) — no click-handler divs, no tabindex hacks, no ARIA widgets.
  *   - Document structure: `lang`, landmarks (header/nav/main), skip link.
  *   - Small screens: long repo-controlled tokens wrap (`overflow-wrap`) so
- *     320px produces no horizontal scroll. Layout is asserted at the CSS-rule
- *     level (happy-dom does no real layout; the visual check is manual).
+ *     320px produces no horizontal scroll, and the sidebar collapses to a
+ *     horizontally scrollable tab row under 736px. Layout is asserted at the
+ *     CSS-rule level (happy-dom does no real layout; visual check is manual).
  */
 
 import { describe, expect, it } from "vitest";
@@ -136,53 +137,41 @@ describe("native interactive controls", () => {
     expect(doc.querySelectorAll("button").length).toBe(0);
   });
 
-  it("labels every chapter radio (accessible name comes from the nav label)", () => {
+  it("tab navigation is plain anchors with non-empty names and real targets", () => {
+    const doc = parse(render());
+    const tabs = Array.from(doc.querySelectorAll("nav.tabs a"));
+    expect(tabs.length).toBe(5);
+    for (const tab of tabs) {
+      expect(tab.textContent.trim().length).toBeGreaterThan(0);
+      const href = tab.getAttribute("href")!;
+      expect(href.startsWith("#")).toBe(true);
+      expect(doc.getElementById(href.slice(1))).not.toBeNull();
+    }
+  });
+
+  it("labels every filter radio (accessible name comes from the chip)", () => {
     const doc = parse(render());
     const radios = Array.from(
-      doc.querySelectorAll('input[type="radio"][name="chapter"]')
+      doc.querySelectorAll('input[type="radio"][name="filter"]')
     );
     expect(radios.length).toBeGreaterThan(0);
     for (const radio of radios) {
       const id = radio.getAttribute("id")!;
-      // Exactly one nav label names the radio; any further labels are the
-      // previous/next pager controls, which are labels too (native elements).
-      const navLabels = doc.querySelectorAll(`nav label[for="${id}"]`);
-      expect(navLabels.length).toBe(1);
-      expect(navLabels[0]!.textContent.trim().length).toBeGreaterThan(0);
-      for (const label of Array.from(doc.querySelectorAll(`label[for="${id}"]`))) {
-        expect(label.textContent.trim().length).toBeGreaterThan(0);
-      }
+      const labels = doc.querySelectorAll(`label[for="${id}"]`);
+      expect(labels.length).toBe(1);
+      expect(labels[0]!.textContent.trim().length).toBeGreaterThan(0);
     }
   });
 
-  it("hides the radios accessibly — clipped, never display:none", () => {
-    const rules = selectorsWith(css(render()), "clip-path:inset(50%)");
-    expect(rules).toContain('input[name="chapter"]');
+  it("hides the filter radios accessibly — clipped, never display:none", () => {
     const style = css(render());
+    const rules = selectorsWith(style, "clip-path:inset(50%)");
+    expect(rules).toContain('input[name="filter"]');
     for (const selector of selectorsWith(style, "display:none")) {
       expect(selector).not.toContain("input");
     }
     for (const selector of selectorsWith(style, "visibility:hidden")) {
       expect(selector).not.toContain("input");
-    }
-  });
-
-  it("keeps the grouped nav clusters non-interactive text plus native label pills", () => {
-    const doc = parse(render());
-    const groups = Array.from(doc.querySelectorAll("nav .nav-group"));
-    expect(groups.length).toBe(2);
-    for (const group of groups) {
-      // The cluster heading is plain text — no role, no interactivity.
-      const heading = group.querySelector(".nav-group-label")!;
-      expect(heading.tagName.toLowerCase()).toBe("p");
-      expect(heading.hasAttribute("role")).toBe(false);
-      expect(heading.textContent.trim().length).toBeGreaterThan(0);
-      // Every control inside the cluster is a native label bound to a radio.
-      for (const label of Array.from(group.querySelectorAll("label"))) {
-        const target = doc.getElementById(label.getAttribute("for")!);
-        expect(target).not.toBeNull();
-        expect(target!.getAttribute("name")).toBe("chapter");
-      }
     }
   });
 
@@ -206,16 +195,16 @@ describe("native interactive controls", () => {
     expect(housekeeping!.hasAttribute("open")).toBe(false);
   });
 
-  it("gives every radio a visible focus indicator on its label", () => {
-    const doc = parse(render());
+  it("gives anchors a visible focus indicator and each filter radio one on its chip", () => {
     const style = css(render());
-    const radios = Array.from(
-      doc.querySelectorAll('input[type="radio"][name="chapter"]')
-    );
-    for (const radio of radios) {
+    expect(style).toMatch(/a:focus-visible\{outline:/);
+    const doc = parse(render());
+    for (const radio of Array.from(
+      doc.querySelectorAll('input[type="radio"][name="filter"]')
+    )) {
       const id = radio.getAttribute("id")!;
       expect(style).toContain(
-        `#${id}:focus-visible~nav label[for="${id}"]{outline:`
+        `#${id}:focus-visible~.filters label[for="${id}"]{outline:`
       );
     }
   });
@@ -262,10 +251,23 @@ describe("landmarks and skip link", () => {
       expect(selector).not.toContain("skip-link");
     }
   });
+
+  it("puts the sidebar (and its tab anchors) before main in focus order", () => {
+    const doc = parse(render());
+    const body = doc.body;
+    const sidebarIndex = Array.from(body.querySelectorAll("*")).findIndex(
+      (el) => el.getAttribute("class") === "sidebar"
+    );
+    const mainIndex = Array.from(body.querySelectorAll("*")).findIndex(
+      (el) => el.tagName.toLowerCase() === "main"
+    );
+    expect(sidebarIndex).toBeGreaterThanOrEqual(0);
+    expect(mainIndex).toBeGreaterThan(sidebarIndex);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Small screens: wrapping rules so 320px never scrolls horizontally
+// Small screens: wrapping + sidebar collapse so 320px never scrolls sideways
 // ---------------------------------------------------------------------------
 
 describe("small-screen hardening (CSS-rule level; visual check manual)", () => {
@@ -281,9 +283,17 @@ describe("small-screen hardening (CSS-rule level; visual check manual)", () => {
       .join(",")
       .split(",")
       .map((s) => s.trim());
-    for (const needed of ["h1", "h2", "h3", "p", "li", "code", "summary", "label"]) {
+    for (const needed of ["h1", "h2", "h3", "p", "li", "code", "summary", "label", "a"]) {
       expect(selectors, `missing overflow-wrap for ${needed}`).toContain(needed);
     }
+  });
+
+  it("collapses the sidebar to a horizontally scrollable tab row under 736px", () => {
+    const style = css(render());
+    expect(style).toContain("@media (max-width:735px)");
+    const collapsed = style.slice(style.indexOf("@media (max-width:735px)"));
+    expect(collapsed).toMatch(/\.tabs\{[^}]*overflow-x:auto/);
+    expect(collapsed).toMatch(/\.layout\{[^}]*flex-direction:column/);
   });
 
   it("scales diagrams down and lets oversized ones scroll inside their figure", () => {
@@ -317,7 +327,7 @@ describe("small-screen hardening (CSS-rule level; visual check manual)", () => {
     // overflow-wrap rules (overflow-wrap inherits, so an ancestor match
     // counts) or inside the SVG (which clips to its viewBox and scales
     // via max-width).
-    const wrappedSelector = "h1,h2,h3,p,li,code,summary,label,figcaption";
+    const wrappedSelector = "h1,h2,h3,p,li,code,summary,label,a,figcaption";
     let found = 0;
     for (const el of Array.from(doc.querySelectorAll("*"))) {
       const ownText = Array.from(el.childNodes)

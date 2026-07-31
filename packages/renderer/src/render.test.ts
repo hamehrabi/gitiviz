@@ -131,6 +131,12 @@ function parse(html: string) {
   return parser.parseFromString(html, "text/html");
 }
 
+function styleOf(html: string): string {
+  return parse(html).querySelector("style")!.textContent;
+}
+
+const TAB_HREFS = ["#home", "#overview", "#architecture", "#how-it-works", "#more"];
+
 // ---------------------------------------------------------------------------
 // Fixture sanity — the fixtures must be schema-valid or the tests test nothing.
 // ---------------------------------------------------------------------------
@@ -181,16 +187,22 @@ describe("renderChangeBook document shell", () => {
       }
     }
   });
+
+  it("stays byte-deterministic", () => {
+    expect(renderDemo()).toBe(renderDemo());
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Masthead
+// Sidebar: wordmark + tab nav
 // ---------------------------------------------------------------------------
 
-describe("masthead", () => {
-  it("shows kicker, repository display name, and a human subtitle", () => {
+describe("sidebar", () => {
+  it("puts the wordmark masthead inside the sidebar", () => {
     const doc = parse(renderDemo());
-    const header = doc.querySelector("header.masthead");
+    const sidebar = doc.querySelector("aside.sidebar");
+    expect(sidebar).not.toBeNull();
+    const header = sidebar!.querySelector("header.masthead");
     expect(header).not.toBeNull();
     expect(header!.querySelector(".masthead-kicker")!.textContent).toBe("Change book");
     expect(header!.querySelector("h1")!.textContent).toBe("demo-app");
@@ -225,78 +237,245 @@ describe("masthead", () => {
     expect(html).not.toContain("<script>alert");
     expect(parse(html).querySelectorAll("script").length).toBe(0);
   });
-});
 
-// ---------------------------------------------------------------------------
-// Navigation grouping and labels
-// ---------------------------------------------------------------------------
-
-describe("navigation grouping and labels", () => {
-  it("groups the nav into 'This change' and 'The book' clusters", () => {
-    const doc = parse(renderDemo());
-    const groups = doc.querySelectorAll("nav .nav-group");
-    expect(groups.length).toBe(2);
-    expect(groups[0]!.querySelector(".nav-group-label")!.textContent).toBe("This change");
-    expect(groups[1]!.querySelector(".nav-group-label")!.textContent).toBe("The book");
-    // Overview + 2 meaningful change units; the ten canonical book chapters.
-    expect(groups[0]!.querySelectorAll("label").length).toBe(3);
-    expect(groups[1]!.querySelectorAll("label").length).toBe(10);
-  });
-
-  it("numbers change-chapter nav labels and keeps them short", () => {
-    const doc = parse(renderDemo());
-    const labels = Array.from(doc.querySelectorAll("nav label")).map(
-      (label) => label.textContent
-    );
-    expect(labels[0]).toBe("Overview");
-    expect(labels[1]).toBe("1 · Guests can now check out");
-    expect(labels[2]).toBe("2 · refactor: rename order helpers");
-  });
-
-  it("truncates long titles on a word boundary in the nav; the heading keeps the full title", () => {
-    const change = demoChange();
-    change.changeUnits[0]!.humanTitle =
-      "Guests can now check out without creating an account first";
-    const doc = parse(renderChangeBook(demoBook(change), change));
-    const label = Array.from(doc.querySelectorAll("nav label")).find((l) =>
-      l.textContent.startsWith("1 · ")
-    )!;
-    expect(label.textContent).toBe("1 · Guests can now check out…");
-    const headings = Array.from(doc.querySelectorAll("h2")).map((h) => h.textContent);
-    expect(headings).toContain(
-      "Guests can now check out without creating an account first"
-    );
-  });
-
-  it("styles nav labels as compact pills with a clear active state", () => {
-    const css = parse(renderDemo()).querySelector("style")!.textContent;
-    expect(css).toMatch(/nav label\{[^}]*cursor:pointer/);
-    expect(css).toMatch(/nav label\{[^}]*border-radius:999px/);
-    // Active state pairs the checked radio with its nav pill.
-    expect(css).toContain('#c0:checked~nav label[for="c0"]');
+  it("is sticky on wide screens and collapses to a scrollable tab row under 736px", () => {
+    const css = styleOf(renderDemo());
+    expect(css).toMatch(/\.sidebar\{[^}]*position:sticky/);
+    expect(css).toContain("@media (max-width:735px)");
+    const collapsed = css.slice(css.indexOf("@media (max-width:735px)"));
+    expect(collapsed).toMatch(/\.tabs\{[^}]*overflow-x:auto/);
+    expect(collapsed).toMatch(/\.sidebar\{[^}]*position:static/);
   });
 });
 
+describe("tab navigation", () => {
+  it("renders the five view tabs, in order, as plain anchors", () => {
+    const doc = parse(renderDemo());
+    const nav = doc.querySelector("nav.tabs");
+    expect(nav).not.toBeNull();
+    expect(nav!.getAttribute("aria-label")).toBeTruthy();
+    const tabs = Array.from(nav!.querySelectorAll("a"));
+    expect(tabs.map((a) => a.getAttribute("href"))).toEqual(TAB_HREFS);
+    expect(tabs.map((a) => a.textContent)).toEqual([
+      "Home",
+      "Overview",
+      "Architecture",
+      "How it works",
+      "More"
+    ]);
+  });
+
+  it("points every tab at a real section id", () => {
+    const doc = parse(renderDemo());
+    for (const a of Array.from(doc.querySelectorAll("nav.tabs a"))) {
+      const target = doc.getElementById(a.getAttribute("href")!.slice(1));
+      expect(target, `dangling tab ${a.getAttribute("href")}`).not.toBeNull();
+      expect(target!.tagName.toLowerCase()).toBe("section");
+    }
+  });
+
+  it("shows home by default and any :target section instead (pure CSS)", () => {
+    const css = styleOf(renderDemo());
+    expect(css).toContain("main>section{display:none");
+    expect(css).toContain("main>section:target{display:block}");
+    expect(css).toContain("#home{display:block}");
+    // Sibling technique: home is the LAST section, hidden when any earlier
+    // section is targeted. Degrades without :has support.
+    expect(css).toContain("main>section:target~#home{display:none}");
+  });
+
+  it("keeps home as the last section so the sibling hide rule can reach it", () => {
+    const doc = parse(renderDemo());
+    const sections = Array.from(doc.querySelectorAll("main > section"));
+    expect(sections.length).toBeGreaterThan(1);
+    expect(sections[sections.length - 1]!.getAttribute("id")).toBe("home");
+  });
+
+  it("marks the current tab active: home by default, :has-based otherwise", () => {
+    const css = styleOf(renderDemo());
+    expect(css).toMatch(/\.tabs a\[href="#home"\]\{[^}]*background:#eff6ff/);
+    // Progressive enhancement: browsers without :has simply keep Home lit.
+    expect(css).toContain(
+      'body:has(#overview:target,#architecture:target,#how-it-works:target,#more:target) .tabs a[href="#home"]'
+    );
+    for (const id of ["overview", "architecture", "how-it-works", "more"]) {
+      expect(css).toContain(`body:has(#${id}:target) .tabs a[href="#${id}"]`);
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
-// Commit timeline
+// Home: commit cards grid
 // ---------------------------------------------------------------------------
 
-describe("commit timeline", () => {
-  it("shows one node per meaningful unit using the narrated human title", () => {
+describe("home cards grid", () => {
+  it("renders one card per meaningful change unit; grouped commits get none", () => {
     const doc = parse(renderDemo());
-    const titles = Array.from(
-      doc.querySelector("ol.timeline")!.querySelectorAll(".timeline-title")
-    ).map((t) => t.textContent);
+    const cards = doc.querySelectorAll("#home .grid .card");
+    expect(cards.length).toBe(2);
+    expect(doc.querySelector("#home")!.textContent).not.toContain("fixup!");
+  });
+
+  it("shows the narrated human title, falling back to the technical title", () => {
+    const doc = parse(renderDemo());
+    const titles = Array.from(doc.querySelectorAll("#home .card .card-title")).map(
+      (t) => t.textContent.trim()
+    );
     expect(titles).toEqual([
       "Guests can now check out",
       "refactor: rename order helpers"
     ]);
   });
 
-  it("attaches the short commit sha as muted evidence on each node", () => {
+  it("shows a one-line summary when narrated, and the short sha", () => {
     const doc = parse(renderDemo());
+    const cards = Array.from(doc.querySelectorAll("#home .card"));
+    expect(cards[0]!.querySelector(".card-summary")!.textContent).toBe(
+      "Adds a POST /orders route with validation."
+    );
+    expect(cards[1]!.querySelector(".card-summary")).toBeNull();
+    expect(cards[0]!.querySelector("code.card-sha")!.textContent).toBe("ccccccc");
+    expect(cards[1]!.querySelector("code.card-sha")!.textContent).toBe("ddddddd");
+  });
+
+  it("derives the type tag from the conventional-commit prefix", () => {
+    const doc = parse(renderDemo());
+    const cards = Array.from(doc.querySelectorAll("#home .card"));
+    expect(cards[0]!.querySelector(".tag")!.textContent).toBe("feature");
+    expect(cards[0]!.getAttribute("class")).toContain("type-feature");
+    // refactor: falls into the housekeeping bucket.
+    expect(cards[1]!.querySelector(".tag")!.textContent).toBe("housekeeping");
+    expect(cards[1]!.getAttribute("class")).toContain("type-housekeeping");
+  });
+
+  it("shows affected-chapter chips derived from what the unit touches", () => {
+    const doc = parse(renderDemo());
+    const cards = Array.from(doc.querySelectorAll("#home .card"));
+    const chipTexts = cards.map((card) =>
+      Array.from(card.querySelectorAll(".chip")).map((c) => c.textContent)
+    );
+    // unit-1 touches entities (systems), a relationship (flows), a route
+    // (contracts); unit-2 touches only a module entity.
+    expect(chipTexts).toEqual([["Systems", "Flows", "Contracts"], ["Systems"]]);
+  });
+
+  it("marks narrated cards with the ◇ provenance glyph", () => {
+    const change = demoChange();
+    change.changeUnits[0]!.provenance = "inferred";
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const card = doc.querySelector("#home .card")!;
+    const prov = card.querySelector(".prov");
+    expect(prov).not.toBeNull();
+    expect(prov!.textContent).toBe("◇");
+    expect(prov!.getAttribute("title")).toContain("AI interpretation");
+  });
+
+  it("says so plainly when there are no meaningful changes", () => {
+    const change = demoChange();
+    change.changeUnits = change.changeUnits.filter((u) => u.grouped);
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const home = doc.querySelector("#home")!;
+    expect(home.querySelectorAll(".card").length).toBe(0);
+    expect(home.querySelectorAll('input[name="filter"]').length).toBe(0);
+    expect(home.textContent).toContain("No meaningful changes");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Home: CSS-only filter chips
+// ---------------------------------------------------------------------------
+
+describe("filter chips (scriptless)", () => {
+  it('offers "All" plus exactly the commit types present', () => {
+    const doc = parse(renderDemo());
+    const labels = Array.from(doc.querySelectorAll("#home .filters label")).map(
+      (l) => l.textContent
+    );
+    expect(labels).toEqual(["All", "feature", "housekeeping"]);
+  });
+
+  it("uses radio inputs preceding the grid so sibling selectors can filter", () => {
+    const doc = parse(renderDemo());
+    const home = doc.querySelector("#home")!;
+    const children = Array.from(home.children);
+    const radios = children.filter((el) => el.tagName.toLowerCase() === "input");
+    expect(radios.map((r) => r.getAttribute("id"))).toEqual([
+      "f-all",
+      "f-feature",
+      "f-housekeeping"
+    ]);
+    for (const radio of radios) {
+      expect(radio.getAttribute("type")).toBe("radio");
+      expect(radio.getAttribute("name")).toBe("filter");
+    }
+    expect(
+      radios.filter((r) => r.hasAttribute("checked")).map((r) => r.getAttribute("id"))
+    ).toEqual(["f-all"]);
+    // Document order: radios, then chips, then the grid — the CSS depends on it.
+    const kinds = children.map((el) =>
+      el.tagName.toLowerCase() === "input" ? "input" : el.getAttribute("class") ?? ""
+    );
+    expect(kinds.lastIndexOf("input")).toBeLessThan(kinds.indexOf("filters"));
+    expect(kinds.indexOf("filters")).toBeLessThan(kinds.indexOf("grid"));
+  });
+
+  it("binds every chip label to a real filter radio", () => {
+    const doc = parse(renderDemo());
+    for (const label of Array.from(doc.querySelectorAll("#home .filters label"))) {
+      const target = doc.getElementById(label.getAttribute("for")!);
+      expect(target).not.toBeNull();
+      expect(target!.getAttribute("name")).toBe("filter");
+    }
+  });
+
+  it("hides non-matching cards via sibling selectors when a type is checked", () => {
+    const css = styleOf(renderDemo());
+    for (const type of ["feature", "housekeeping"]) {
+      expect(css).toContain(
+        `#f-${type}:checked~.grid .card:not(.type-${type}){display:none}`
+      );
+    }
+    // No hide rule for All — everything stays visible.
+    expect(css).not.toContain("#f-all:checked~.grid");
+  });
+
+  it("gives the checked chip an active state and a focus ring", () => {
+    const css = styleOf(renderDemo());
+    for (const id of ["f-all", "f-feature", "f-housekeeping"]) {
+      expect(css).toContain(`#${id}:checked~.filters label[for="${id}"]`);
+      expect(css).toContain(`#${id}:focus-visible~.filters label[for="${id}"]{outline:`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Overview view
+// ---------------------------------------------------------------------------
+
+describe("overview view", () => {
+  it("summarizes repo, revisions, and meaningful change count under its question", () => {
+    const doc = parse(renderDemo());
+    const overview = doc.querySelector("#overview")!;
+    expect(overview.querySelector("h2")!.textContent).toBe("Overview");
+    expect(overview.querySelector(".view-sub")!.textContent).toBe(
+      "What changed, and why does it matter?"
+    );
+    expect(overview.textContent).toContain("demo-app");
+    expect(overview.textContent).toContain("2 meaningful changes");
+    expect(overview.textContent).toContain("aaaaaaaaaa");
+  });
+
+  it("shows one timeline node per meaningful unit using the narrated title", () => {
+    const doc = parse(renderDemo());
+    const titles = Array.from(
+      doc.querySelector("#overview ol.timeline")!.querySelectorAll(".timeline-title")
+    ).map((t) => t.textContent);
+    expect(titles).toEqual([
+      "Guests can now check out",
+      "refactor: rename order helpers"
+    ]);
     const shas = Array.from(
-      doc.querySelector("ol.timeline")!.querySelectorAll("code.timeline-sha")
+      doc.querySelector("#overview ol.timeline")!.querySelectorAll("code.timeline-sha")
     ).map((c) => c.textContent);
     expect(shas).toContain("ccccccc");
     for (const sha of shas) expect(sha.length).toBe(7);
@@ -304,7 +483,7 @@ describe("commit timeline", () => {
 
   it("collapses grouped commits under a closed housekeeping details element", () => {
     const doc = parse(renderDemo());
-    const overview = doc.querySelector("main > section")!;
+    const overview = doc.querySelector("#overview")!;
     const housekeeping = overview.querySelector("details.housekeeping");
     expect(housekeeping).not.toBeNull();
     expect(housekeeping!.hasAttribute("open")).toBe(false);
@@ -312,30 +491,92 @@ describe("commit timeline", () => {
       "1 housekeeping commit"
     );
     expect(housekeeping!.textContent).toContain("fixup! feat: add guest checkout route");
-    // Grouped commits never appear as primary timeline nodes.
     expect(overview.querySelector("ol.timeline")!.textContent).not.toContain("fixup!");
+  });
+
+  it("keeps analysis limitations collapsed", () => {
+    const doc = parse(renderDemo());
+    const overview = doc.querySelector("#overview")!;
+    const details = Array.from(overview.querySelectorAll("details")).find((d) =>
+      d.textContent.includes("regex-derived")
+    );
+    expect(details).toBeDefined();
+    expect(details!.hasAttribute("open")).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Chapter questions
+// Architecture and How-it-works views
 // ---------------------------------------------------------------------------
 
-describe("chapter questions", () => {
-  it("puts the principal question under the overview heading", () => {
+describe("architecture view", () => {
+  it("carries the systems diagram, entities, and connections", () => {
     const doc = parse(renderDemo());
-    const overview = doc.querySelector("main > section")!;
-    expect(overview.querySelector(".chapter-sub")!.textContent).toBe(
-      "What changed, and why does it matter?"
+    const section = doc.querySelector("#architecture")!;
+    expect(section.querySelector("h2")!.textContent).toBe("Architecture");
+    expect(section.querySelector("figure.diagram, figure.diagram-placeholder")).not.toBeNull();
+    expect(section.textContent).toContain("Create order endpoint");
+    expect(section.textContent).toContain("creates order via");
+  });
+
+  it("says not yet written when the systems chapter is not generated", () => {
+    const change = demoChange();
+    const book = demoBook(change);
+    book.chapters = book.chapters.map((c) =>
+      c.id === "systems" ? { ...c, status: "not-written" as const } : c
+    );
+    const doc = parse(renderChangeBook(book, change));
+    expect(doc.querySelector("#architecture")!.textContent).toContain("Not yet written");
+  });
+});
+
+describe("how it works view", () => {
+  it("lists how value moves as verb sentences", () => {
+    const doc = parse(renderDemo());
+    const section = doc.querySelector("#how-it-works")!;
+    expect(section.querySelector("h2")!.textContent).toBe("How it works");
+    expect(section.textContent).toContain(
+      "Create order endpoint —creates order via→ Order service"
     );
   });
 
-  it("gives every book chapter its principal question as a subtitle", () => {
+  it("is honest when there are no derived flows", () => {
+    const change = demoChange();
+    change.relationships = [];
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    expect(doc.querySelector("#how-it-works")!.textContent).toContain("Not yet written");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// More view: remaining book chapters as folds
+// ---------------------------------------------------------------------------
+
+describe("more view", () => {
+  it("folds the remaining seven book chapters into closed details", () => {
     const doc = parse(renderDemo());
-    const text = doc.body.textContent;
-    expect(text).toContain("Why does this system exist?");
-    expect(text).toContain("What are the parts, and how do they fit together?");
-    expect(text).toContain("How did it get here?");
+    const folds = Array.from(doc.querySelectorAll("#more details.fold"));
+    expect(folds.length).toBe(7);
+    for (const fold of folds) expect(fold.hasAttribute("open")).toBe(false);
+    const summaries = folds.map((f) => f.querySelector("summary")!.textContent);
+    expect(summaries).toEqual([
+      "Title for journeys",
+      "Title for capabilities",
+      "Title for contracts",
+      "Title for security",
+      "Title for operations",
+      "Title for decisions",
+      "Title for history"
+    ]);
+  });
+
+  it("renders the history fold's timeline and marks unwritten chapters honestly", () => {
+    const doc = parse(renderDemo());
+    const folds = Array.from(doc.querySelectorAll("#more details.fold"));
+    const history = folds[folds.length - 1]!;
+    expect(history.querySelector("ol.timeline")).not.toBeNull();
+    const journeys = folds[0]!;
+    expect(journeys.textContent).toContain("Not yet written");
   });
 });
 
@@ -358,187 +599,20 @@ describe("provenance markers", () => {
     expect(renderDemo()).not.toContain("◇");
   });
 
-  it("badges narrated (inferred) chapters with ◇ AI interpretation and a title attribute", () => {
+  it("marks narrated units with ◇ in the overview timeline too", () => {
     const change = demoChange();
     change.changeUnits[0]!.provenance = "inferred";
     const doc = parse(renderChangeBook(demoBook(change), change));
-    const badge = doc.querySelector(".badge.badge-inferred");
-    expect(badge).not.toBeNull();
-    expect(badge!.textContent).toBe("◇ AI interpretation");
-    expect(badge!.getAttribute("title")).toContain("AI interpretation");
-    // The timeline node for the narrated unit carries the ◇ glyph too.
-    expect(doc.querySelector("ol.timeline")!.textContent).toContain("◇");
+    expect(doc.querySelector("#overview ol.timeline")!.textContent).toContain("◇");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Chapters and CSS-only navigation
-// ---------------------------------------------------------------------------
-
-describe("chapter navigation (scriptless)", () => {
-  it("renders one section per chapter: overview + meaningful units + ten book chapters", () => {
-    const doc = parse(renderDemo());
-    const sections = doc.querySelectorAll("main > section");
-    // 1 overview + 2 meaningful change units (unit-3 is grouped) + 10 book chapters
-    expect(sections.length).toBe(13);
-  });
-
-  it("selects exactly one chapter by default via a checked radio", () => {
-    const doc = parse(renderDemo());
-    const radios = doc.querySelectorAll('input[type="radio"][name="chapter"]');
-    expect(radios.length).toBe(13);
-    const checked = Array.from(radios).filter((r) => r.hasAttribute("checked"));
-    expect(checked.length).toBe(1);
-    // The overview opens first.
-    expect(checked[0]!.getAttribute("id")).toBe(doc.querySelectorAll("input")[0]!.getAttribute("id"));
-  });
-
-  it("hides all sections by default and reveals exactly the checked one via CSS", () => {
-    const html = renderDemo();
-    const doc = parse(html);
-    const css = doc.querySelector("style")!.textContent;
-    expect(css).toContain("main > section{display:none");
-    const sections = Array.from(doc.querySelectorAll("main > section"));
-    const radios = Array.from(doc.querySelectorAll('input[type="radio"][name="chapter"]'));
-    // One reveal rule per chapter, pairing radio id to section id.
-    for (let i = 0; i < radios.length; i++) {
-      const radioId = radios[i]!.getAttribute("id");
-      const sectionId = sections[i]!.getAttribute("id");
-      expect(css).toContain(`#${radioId}:checked~#${sectionId}{display:block`);
-    }
-  });
-
-  it("navigation uses native labels bound to the radios, no click-handler divs", () => {
-    const doc = parse(renderDemo());
-    const labels = doc.querySelectorAll("nav label[for]");
-    expect(labels.length).toBe(13);
-    for (const label of Array.from(labels)) {
-      const target = doc.getElementById(label.getAttribute("for")!);
-      expect(target).not.toBeNull();
-      expect(target!.tagName.toLowerCase()).toBe("input");
-    }
-  });
-
-  it("gives every chapter except the first a Previous label targeting the prior radio", () => {
-    const doc = parse(renderDemo());
-    const sections = Array.from(doc.querySelectorAll("main > section"));
-    expect(sections.length).toBeGreaterThan(1);
-    sections.forEach((section, i) => {
-      const prev = section.querySelector("label.pager-prev");
-      if (i === 0) {
-        expect(prev, "first chapter must not offer Previous").toBeNull();
-      } else {
-        expect(prev, `chapter ${i} missing Previous`).not.toBeNull();
-        expect(prev!.getAttribute("for")).toBe(`c${i - 1}`);
-        expect(prev!.textContent).toContain("Previous");
-      }
-    });
-  });
-
-  it("gives every chapter except the last a Next label targeting the next radio", () => {
-    const doc = parse(renderDemo());
-    const sections = Array.from(doc.querySelectorAll("main > section"));
-    const last = sections.length - 1;
-    sections.forEach((section, i) => {
-      const next = section.querySelector("label.pager-next");
-      if (i === last) {
-        expect(next, "last chapter must not offer Next").toBeNull();
-      } else {
-        expect(next, `chapter ${i} missing Next`).not.toBeNull();
-        expect(next!.getAttribute("for")).toBe(`c${i + 1}`);
-        expect(next!.textContent).toContain("Next");
-      }
-    });
-  });
-
-  it("pager labels target existing chapter radios and add no scripts", () => {
-    const doc = parse(renderDemo());
-    const pagerLabels = Array.from(
-      doc.querySelectorAll("label.pager-prev, label.pager-next")
-    );
-    expect(pagerLabels.length).toBeGreaterThan(0);
-    for (const label of pagerLabels) {
-      const target = doc.getElementById(label.getAttribute("for")!);
-      expect(target).not.toBeNull();
-      expect(target!.tagName.toLowerCase()).toBe("input");
-      expect(target!.getAttribute("name")).toBe("chapter");
-    }
-    expect(doc.querySelectorAll("script").length).toBe(0);
-  });
-
-  it("stays byte-deterministic with the pager present", () => {
-    expect(renderDemo()).toBe(renderDemo());
-  });
-
-  it("grouped change units get no chapter but stay in the overview timeline", () => {
-    const doc = parse(renderDemo());
-    const overview = doc.querySelector("main > section")!;
-    expect(overview.textContent).toContain("fixup! feat: add guest checkout route");
-    expect(overview.textContent).toContain("fixup commit");
-    // No dedicated section mentions the fixup title beyond the timelines.
-    const sections = Array.from(doc.querySelectorAll("main > section"));
-    const headings = sections.map((s) => s.querySelector("h2")?.textContent ?? "");
-    expect(headings.some((h) => h.includes("fixup!"))).toBe(false);
-  });
-
-  it("book chapters marked not-written say so honestly", () => {
-    const doc = parse(renderDemo());
-    const text = doc.body.textContent;
-    expect(text).toContain("Not yet written");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Chapter content
-// ---------------------------------------------------------------------------
-
-describe("chapter content", () => {
-  it("overview states repo, revisions, and meaningful change count", () => {
-    const doc = parse(renderDemo());
-    const overview = doc.querySelector("main > section")!;
-    expect(overview.textContent).toContain("demo-app");
-    expect(overview.textContent).toContain("aaaaaaaaaa".slice(0, 10));
-    expect(overview.textContent).toContain("2 meaningful changes");
-  });
-
-  it("change chapters prefer human titles and show narration", () => {
-    const doc = parse(renderDemo());
-    const text = doc.body.textContent;
-    expect(text).toContain("Guests can now check out");
-    expect(text).toContain("Adds a POST /orders route with validation.");
-    expect(text).toContain("Only registered users could order.");
-    expect(text).toContain("Guests can place orders too.");
-    expect(text).toContain("Guests no longer need an account.");
-  });
-
-  it("falls back to the technical title when no human title exists", () => {
-    const doc = parse(renderDemo());
-    expect(doc.body.textContent).toContain("refactor: rename order helpers");
-  });
-
-  it("change chapters list what stayed unchanged", () => {
-    const doc = parse(renderDemo());
-    const text = doc.body.textContent;
-    expect(text).toContain("Orders table");
-  });
-
-  it("evidence sits inside closed details elements", () => {
-    const doc = parse(renderDemo());
-    const details = doc.querySelectorAll("details");
-    expect(details.length).toBeGreaterThan(0);
-    for (const d of Array.from(details)) {
-      expect(d.hasAttribute("open")).toBe(false);
-    }
-    expect(doc.body.textContent).toContain("src/routes/orders.ts");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Diagram insertion point (Task 15b plugs in here)
+// Diagram insertion point
 // ---------------------------------------------------------------------------
 
 describe("diagram insertion point", () => {
-  it("invokes the renderDiagram callback for systems and change chapters", () => {
+  it("invokes the renderDiagram callback for the architecture view", () => {
     const requests: DiagramRequest[] = [];
     const html = renderDemo({
       renderDiagram: (req) => {
@@ -546,12 +620,9 @@ describe("diagram insertion point", () => {
         return `<svg role="img" aria-label="diagram" viewBox="0 0 10 10"></svg>`;
       }
     });
-    const kinds = requests.map((r) => r.kind);
-    expect(kinds).toContain("context");
-    expect(kinds.filter((k) => k === "change").length).toBe(2);
-    const changeReq = requests.find((r) => r.kind === "change" && r.changeUnit?.id === "unit-1")!;
-    expect(changeReq.entities.map((e) => e.id).sort()).toEqual(["ent-route", "ent-service"]);
-    expect(changeReq.relationships.map((r) => r.id)).toEqual(["rel-1"]);
+    const context = requests.filter((r) => r.kind === "context");
+    expect(context.length).toBe(1);
+    expect(context[0]!.entities.length).toBe(3);
     expect(html).toContain('aria-label="diagram"');
   });
 
