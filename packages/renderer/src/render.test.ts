@@ -231,6 +231,57 @@ describe("chapter navigation (scriptless)", () => {
     }
   });
 
+  it("gives every chapter except the first a Previous label targeting the prior radio", () => {
+    const doc = parse(renderDemo());
+    const sections = Array.from(doc.querySelectorAll("main > section"));
+    expect(sections.length).toBeGreaterThan(1);
+    sections.forEach((section, i) => {
+      const prev = section.querySelector("label.pager-prev");
+      if (i === 0) {
+        expect(prev, "first chapter must not offer Previous").toBeNull();
+      } else {
+        expect(prev, `chapter ${i} missing Previous`).not.toBeNull();
+        expect(prev!.getAttribute("for")).toBe(`c${i - 1}`);
+        expect(prev!.textContent).toContain("Previous");
+      }
+    });
+  });
+
+  it("gives every chapter except the last a Next label targeting the next radio", () => {
+    const doc = parse(renderDemo());
+    const sections = Array.from(doc.querySelectorAll("main > section"));
+    const last = sections.length - 1;
+    sections.forEach((section, i) => {
+      const next = section.querySelector("label.pager-next");
+      if (i === last) {
+        expect(next, "last chapter must not offer Next").toBeNull();
+      } else {
+        expect(next, `chapter ${i} missing Next`).not.toBeNull();
+        expect(next!.getAttribute("for")).toBe(`c${i + 1}`);
+        expect(next!.textContent).toContain("Next");
+      }
+    });
+  });
+
+  it("pager labels target existing chapter radios and add no scripts", () => {
+    const doc = parse(renderDemo());
+    const pagerLabels = Array.from(
+      doc.querySelectorAll("label.pager-prev, label.pager-next")
+    );
+    expect(pagerLabels.length).toBeGreaterThan(0);
+    for (const label of pagerLabels) {
+      const target = doc.getElementById(label.getAttribute("for")!);
+      expect(target).not.toBeNull();
+      expect(target!.tagName.toLowerCase()).toBe("input");
+      expect(target!.getAttribute("name")).toBe("chapter");
+    }
+    expect(doc.querySelectorAll("script").length).toBe(0);
+  });
+
+  it("stays byte-deterministic with the pager present", () => {
+    expect(renderDemo()).toBe(renderDemo());
+  });
+
   it("grouped change units get no chapter but stay in the overview timeline", () => {
     const doc = parse(renderDemo());
     const overview = doc.querySelector("main > section")!;

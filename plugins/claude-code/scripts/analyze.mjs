@@ -8509,6 +8509,12 @@ function bookChapter(chapter, change, options) {
   }
   return { navLabel: chapter.title, body };
 }
+function pager(index, count) {
+  const prev = index > 0 ? `<label class="pager-prev" for="c${index - 1}">\u2190 Previous</label>` : "";
+  const next = index < count - 1 ? `<label class="pager-next" for="c${index + 1}">Next \u2192</label>` : "";
+  if (prev === "" && next === "") return "";
+  return `<footer class="pager">${prev}${next}</footer>`;
+}
 function stylesheet(chapterCount) {
   const reveal = [];
   for (let i = 0; i < chapterCount; i++) {
@@ -8558,6 +8564,12 @@ function stylesheet(chapterCount) {
     `nav label{cursor:pointer;color:#6b7280;padding:0.25rem 0;border-bottom:2px solid transparent}`,
     `nav label:hover{color:#1f2937}`,
     `main > section{display:none;padding-bottom:3rem}`,
+    // Previous/Next: quiet bordered labels at the chapter foot; Next hugs the
+    // right edge even when Previous is absent (first chapter).
+    `.pager{display:flex;gap:0.75rem;margin-top:2.5rem;border-top:1px solid #e5e7eb;padding-top:1rem}`,
+    `.pager label{cursor:pointer;color:#6b7280;border:1px solid #e5e7eb;border-radius:6px;padding:0.375rem 0.875rem}`,
+    `.pager label:hover{color:#1f2937;border-color:#d1d5db}`,
+    `.pager-next{margin-left:auto}`,
     ...reveal
   ].join("\n");
 }
@@ -8573,7 +8585,9 @@ function renderChangeBook(book, change, options = {}) {
     (_, i) => `<input type="radio" name="chapter" id="c${i}"${i === 0 ? " checked" : ""}>`
   ).join("");
   const nav = `<nav aria-label="Chapters">` + chapters.map((chapter, i) => `<label for="c${i}">${escHtml(chapter.navLabel)}</label>`).join("") + `</nav>`;
-  const sections = chapters.map((chapter, i) => `<section id="p${i}">${chapter.body}</section>`).join("");
+  const sections = chapters.map(
+    (chapter, i) => `<section id="p${i}">${chapter.body}${pager(i, chapters.length)}</section>`
+  ).join("");
   const title = escHtml(`${change.repository.name} \u2014 change book`);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_CONTENT}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${stylesheet(chapters.length)}</style></head><body><a class="skip-link" href="#main">Skip to content</a><header><h1>${escHtml(change.repository.name)}</h1><p class="subtitle">${escHtml(shortRev(change.baseRevision))} \u2192 ${escHtml(
     shortRev(change.headRevision)

@@ -144,9 +144,14 @@ describe("native interactive controls", () => {
     expect(radios.length).toBeGreaterThan(0);
     for (const radio of radios) {
       const id = radio.getAttribute("id")!;
-      const labels = doc.querySelectorAll(`label[for="${id}"]`);
-      expect(labels.length).toBe(1);
-      expect(labels[0]!.textContent.trim().length).toBeGreaterThan(0);
+      // Exactly one nav label names the radio; any further labels are the
+      // previous/next pager controls, which are labels too (native elements).
+      const navLabels = doc.querySelectorAll(`nav label[for="${id}"]`);
+      expect(navLabels.length).toBe(1);
+      expect(navLabels[0]!.textContent.trim().length).toBeGreaterThan(0);
+      for (const label of Array.from(doc.querySelectorAll(`label[for="${id}"]`))) {
+        expect(label.textContent.trim().length).toBeGreaterThan(0);
+      }
     }
   });
 

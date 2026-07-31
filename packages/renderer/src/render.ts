@@ -297,6 +297,25 @@ function bookChapter(
   return { navLabel: chapter.title, body };
 }
 
+/**
+ * Previous/Next controls at the foot of each chapter (design doc: "a simple
+ * chapter selector plus previous/next controls"). Scriptless: each control is
+ * a plain <label> bound to the adjacent chapter's radio, same technique as
+ * the nav. First chapter omits Previous; last omits Next. The class attribute
+ * precedes `for` so these never collide with the nav's `<label for="cN">`
+ * markup shape.
+ */
+function pager(index: number, count: number): string {
+  const prev =
+    index > 0 ? `<label class="pager-prev" for="c${index - 1}">← Previous</label>` : "";
+  const next =
+    index < count - 1
+      ? `<label class="pager-next" for="c${index + 1}">Next →</label>`
+      : "";
+  if (prev === "" && next === "") return "";
+  return `<footer class="pager">${prev}${next}</footer>`;
+}
+
 // ---------------------------------------------------------------------------
 // Stylesheet (light theme only — user mandate; no dark scheme in v0.1)
 // ---------------------------------------------------------------------------
@@ -358,6 +377,12 @@ function stylesheet(chapterCount: number): string {
     `nav label{cursor:pointer;color:#6b7280;padding:0.25rem 0;border-bottom:2px solid transparent}`,
     `nav label:hover{color:#1f2937}`,
     `main > section{display:none;padding-bottom:3rem}`,
+    // Previous/Next: quiet bordered labels at the chapter foot; Next hugs the
+    // right edge even when Previous is absent (first chapter).
+    `.pager{display:flex;gap:0.75rem;margin-top:2.5rem;border-top:1px solid #e5e7eb;padding-top:1rem}`,
+    `.pager label{cursor:pointer;color:#6b7280;border:1px solid #e5e7eb;border-radius:6px;padding:0.375rem 0.875rem}`,
+    `.pager label:hover{color:#1f2937;border-color:#d1d5db}`,
+    `.pager-next{margin-left:auto}`,
     ...reveal
   ].join("\n");
 }
@@ -399,7 +424,10 @@ export function renderChangeBook(
       .join("") +
     `</nav>`;
   const sections = chapters
-    .map((chapter, i) => `<section id="p${i}">${chapter.body}</section>`)
+    .map(
+      (chapter, i) =>
+        `<section id="p${i}">${chapter.body}${pager(i, chapters.length)}</section>`
+    )
     .join("");
 
   const title = escHtml(`${change.repository.name} — change book`);
