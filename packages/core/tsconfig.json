@@ -9,6 +9,7 @@
   "references": [
     { "path": "../schema" },
     { "path": "../git" },
-    { "path": "../analyzers" }
+    { "path": "../analyzers" },
+    { "path": "../test-fixtures" }
   ]
 }

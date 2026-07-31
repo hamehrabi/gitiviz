@@ -11,6 +11,7 @@
     "@gitiviz/schema": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "@gitiviz/test-fixtures": "workspace:*"
   }
 }
