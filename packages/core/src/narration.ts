@@ -410,3 +410,30 @@ export function templateNarrator(request: NarrationRequest): NarrationResponse {
   }
   return { changeUnits };
 }
+
+/**
+ * No-agent mode: merge the deterministic template narration and keep
+ * provenance "derived". The template restates derived facts verbatim — there
+ * is no AI judgement to flag, so the ◇ AI-interpretation marker must not
+ * appear on template output. Agent responses never come through here; they
+ * go through `applyNarration` directly and are always stamped "inferred".
+ */
+export function applyTemplateNarration(manifest: ChangeManifest): ChangeManifest {
+  const response = templateNarrator(buildNarrationRequest(manifest));
+  const merged = applyNarration(manifest, response);
+  if (!merged.ok) {
+    throw new Error(
+      `template narration rejected (gitiviz bug):\n  - ${merged.errors.join("\n  - ")}`
+    );
+  }
+  // applyNarration defensively stamps everything it merges "inferred";
+  // restore the truth for the units the deterministic template filled.
+  const templatedIds = new Set((response.changeUnits ?? []).map((unit) => unit.id));
+  for (const unit of merged.value.changeUnits) {
+    if (templatedIds.has(unit.id)) {
+      unit.provenance = "derived";
+      delete unit.confidence;
+    }
+  }
+  return merged.value;
+}

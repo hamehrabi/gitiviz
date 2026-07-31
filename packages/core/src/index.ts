@@ -11,6 +11,7 @@ export {
 export { buildBookManifest } from "./book.js";
 export {
   applyNarration,
+  applyTemplateNarration,
   buildNarrationRequest,
   templateNarrator,
   type ChangeUnitNarration,

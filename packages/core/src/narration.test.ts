@@ -3,6 +3,7 @@ import type { ChangeManifest } from "@gitiviz/schema";
 import { validateChangeManifest } from "@gitiviz/schema";
 import {
   applyNarration,
+  applyTemplateNarration,
   buildNarrationRequest,
   templateNarrator
 } from "./narration.js";
@@ -314,6 +315,23 @@ describe("templateNarrator", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(validateChangeManifest(result.value).ok).toBe(true);
+  });
+
+  it("applyTemplateNarration fills slots but keeps provenance derived (no AI marker)", () => {
+    const manifest = makeManifest();
+    const narrated = applyTemplateNarration(manifest);
+    const unit = narrated.changeUnits.find((u) => u.id === "unit-1")!;
+    expect(unit.humanTitle).toBe("feat: add guest checkout route");
+    expect(unit.summary).toBeTruthy();
+    // Deterministic restatement of derived facts is still derived — the
+    // ◇ AI-interpretation marker is reserved for real agent narration.
+    for (const u of narrated.changeUnits) {
+      expect(u.provenance).toBe("derived");
+      expect(u.confidence).toBeUndefined();
+    }
+    expect(validateChangeManifest(JSON.parse(JSON.stringify(narrated))).ok).toBe(true);
+    // Input manifest untouched.
+    expect(manifest.changeUnits[0]!.humanTitle ?? null).toBeNull();
   });
 
   it("stays dry on hostile technical titles (data in, data out, no crash)", () => {

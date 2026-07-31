@@ -8,6 +8,15 @@ importers:
 
   .:
     devDependencies:
+      '@gitiviz/cli':
+        specifier: workspace:*
+        version: link:packages/cli
+      '@gitiviz/schema':
+        specifier: workspace:*
+        version: link:packages/schema
+      '@gitiviz/test-fixtures':
+        specifier: workspace:*
+        version: link:packages/test-fixtures
       ajv:
         specifier: ^8.17.0
         version: 8.20.0

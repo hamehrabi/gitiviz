@@ -8038,6 +8038,24 @@ function templateNarrator(request) {
   }
   return { changeUnits };
 }
+function applyTemplateNarration(manifest) {
+  const response = templateNarrator(buildNarrationRequest(manifest));
+  const merged = applyNarration(manifest, response);
+  if (!merged.ok) {
+    throw new Error(
+      `template narration rejected (gitiviz bug):
+  - ${merged.errors.join("\n  - ")}`
+    );
+  }
+  const templatedIds = new Set((response.changeUnits ?? []).map((unit) => unit.id));
+  for (const unit of merged.value.changeUnits) {
+    if (templatedIds.has(unit.id)) {
+      unit.provenance = "derived";
+      delete unit.confidence;
+    }
+  }
+  return merged.value;
+}
 
 // packages/renderer/src/escape.ts
 var HTML_ESCAPES = {
@@ -8743,7 +8761,7 @@ async function runCompare(options) {
     narrated = mergeNarration(manifest, responseRaw, responsePath);
     io.out(`merged narration from ${responsePath}`);
   } else {
-    narrated = mergeNarration(manifest, templateNarrator(request), "template narration (bug)");
+    narrated = applyTemplateNarration(manifest);
     io.out("no narration-response.json \u2014 used the deterministic template narrator");
   }
   await renderToDist(outDir, book, narrated, io);

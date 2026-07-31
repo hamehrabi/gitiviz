@@ -15,7 +15,8 @@
  * (`applyNarration` stamps everything "inferred"); a rejected response is a
  * hard error with the validator's actionable list — no partial merge, no
  * silent fallback. Without a response the deterministic template narrator
- * fills the same slots. The on-disk change manifest always stays facts-only;
+ * fills the same slots but stays "derived" (it restates facts, so nothing
+ * gets the AI-interpretation marker). The on-disk change manifest always stays facts-only;
  * narration is merged in memory for rendering.
  *
  * Repo-derived strings are hostile: they ride through this module inert
@@ -40,11 +41,11 @@ import {
 } from "@gitiviz/analyzers";
 import {
   applyNarration,
+  applyTemplateNarration,
   buildBookManifest,
   buildChangeUnits,
   buildEvidenceGraph,
-  buildNarrationRequest,
-  templateNarrator
+  buildNarrationRequest
 } from "@gitiviz/core";
 import {
   validateBookManifest,
@@ -326,7 +327,9 @@ export async function runCompare(options: CompareOptions): Promise<void> {
     narrated = mergeNarration(manifest, responseRaw, responsePath);
     io.out(`merged narration from ${responsePath}`);
   } else {
-    narrated = mergeNarration(manifest, templateNarrator(request), "template narration (bug)");
+    // Template output is a deterministic restatement of derived facts, so it
+    // keeps provenance "derived" — no ◇ AI-interpretation marker.
+    narrated = applyTemplateNarration(manifest);
     io.out("no narration-response.json — used the deterministic template narrator");
   }
 
