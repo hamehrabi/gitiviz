@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    # Same image dev.sh uses locally: node:22-bookworm ships Node 22 + git,
+    # so CI exercises exactly the toolchain contributors run in Docker.
+    container: node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trust the checkout inside the container
+        # The container user does not own the bind-mounted workspace; git
+        # refuses "dubious ownership" repos without this.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Activate pnpm
+        run: corepack enable && corepack prepare pnpm@9 --activate
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Bundle plugin scripts
+        run: pnpm bundle
+
+      - name: Fail on stale committed bundles
+        # plugins/claude-code/scripts/*.mjs are committed artifacts; rebuilding
+        # them must be a no-op. A diff here means someone changed packages/
+        # without re-running `pnpm bundle` (see docs/decisions/0001).
+        run: |
+          git diff --exit-code plugins/ || {
+            echo "::error::Committed plugin bundles are stale. Run ./dev.sh 'pnpm bundle' and commit the result."
+            exit 1
+          }
