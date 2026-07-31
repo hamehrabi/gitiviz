@@ -8355,6 +8355,22 @@ function compileDiagram(request) {
 }
 
 // packages/renderer/src/render.ts
+var CHAPTER_QUESTIONS = {
+  purpose: "Why does this system exist?",
+  journeys: "Who uses it, and to do what?",
+  systems: "What are the parts, and how do they fit together?",
+  capabilities: "What can the system do?",
+  flows: "How does work move through the system?",
+  contracts: "What has the system promised to the outside world?",
+  security: "Who can do what, and how is it protected?",
+  operations: "How does it run, and how do we know it is healthy?",
+  decisions: "Why is it built this way?",
+  history: "How did it get here?"
+};
+var OVERVIEW_QUESTION = "What changed, and why does it matter?";
+var NAV_LABEL_MAX = 30;
+var INFERRED_BADGE = `<span class="badge badge-inferred" title="AI interpretation: this text was written by the narrator from the derived facts. Verify it against the evidence.">\u25C7 AI interpretation</span>`;
+var DERIVED_MARK = `<span class="prov" title="Derived deterministically from the repository">\u2713</span>`;
 var STATE_LABELS = {
   added: "+ New",
   changed: "~ Changed",
@@ -8364,8 +8380,18 @@ var STATE_LABELS = {
 function shortRev(rev) {
   return rev === "WORKTREE" ? "working tree" : rev.slice(0, 10);
 }
+function shortSha(sha) {
+  return sha.slice(0, 7);
+}
 function unitTitle(unit) {
   return unit.humanTitle ?? unit.technicalTitle;
+}
+function shortNavLabel(text, max = NAV_LABEL_MAX) {
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max + 1);
+  const lastSpace = slice.lastIndexOf(" ");
+  const head = (lastSpace > 0 ? slice.slice(0, lastSpace) : text.slice(0, max)).replace(/[\s.,;:·—–-]+$/u, "");
+  return `${head}\u2026`;
 }
 function anchorLine(anchor) {
   let text = escHtml(anchor.path);
@@ -8375,7 +8401,7 @@ function anchorLine(anchor) {
   if (anchor.symbol) {
     text += ` <span class="muted">\xB7 ${escHtml(anchor.symbol)}</span>`;
   }
-  return `<li><code>${text}</code></li>`;
+  return `<li>${DERIVED_MARK} <code>${text}</code></li>`;
 }
 function evidenceDetails(anchors) {
   if (anchors.length === 0) return "";
@@ -8390,36 +8416,56 @@ function diagramFigure(request, renderDiagram, caption) {
   return captionHtml + `<figure class="diagram">${svg}</figure>`;
 }
 function timeline(units) {
-  const items = units.map((unit) => {
-    let entry = escHtml(unit.technicalTitle);
-    if (unit.grouped) {
-      const reason = unit.groupedReason ? escHtml(unit.groupedReason) : "grouped";
-      entry += ` <span class="muted">(${reason})</span>`;
-    }
-    return `<li>${entry}</li>`;
+  const meaningful = units.filter((unit) => !unit.grouped);
+  const grouped = units.filter((unit) => unit.grouped);
+  const shaHtml = (unit) => {
+    const sha = unit.commits?.[0];
+    return sha ? ` <code class="timeline-sha">${escHtml(shortSha(sha))}</code>` : "";
+  };
+  const nodes = meaningful.map((unit) => {
+    const mark = unit.provenance === "inferred" ? ` <span class="prov" title="AI interpretation: narrated title, not a derived fact">\u25C7</span>` : "";
+    return `<li><span class="timeline-title">${escHtml(unitTitle(unit))}</span>${mark}${shaHtml(unit)}</li>`;
   }).join("");
-  return `<ol class="timeline">${items}</ol>`;
+  let html = `<ol class="timeline">${nodes}</ol>`;
+  if (grouped.length > 0) {
+    const items = grouped.map((unit) => {
+      const reason = unit.groupedReason ? ` <span class="muted">(${escHtml(unit.groupedReason)})</span>` : "";
+      return `<li>${escHtml(unit.technicalTitle)}${shaHtml(unit)}${reason}</li>`;
+    }).join("");
+    html += `<details class="housekeeping"><summary>${grouped.length} housekeeping commit${grouped.length === 1 ? "" : "s"}</summary><ul>${items}</ul></details>`;
+  }
+  return html;
+}
+function chapterHead(title, subtitle) {
+  const sub = subtitle === "" ? "" : `<p class="chapter-sub">${subtitle}</p>`;
+  return `<h2>${escHtml(title)}</h2>${sub}`;
 }
 function overviewChapter(change, meaningful) {
   const count = meaningful.length;
   const countText = `${count} meaningful change${count === 1 ? "" : "s"}`;
   const limitations = change.analysisLimitations.length === 0 ? "" : `<details><summary>Analysis limitations</summary><ul>` + change.analysisLimitations.map((limitation) => `<li>${escHtml(limitation.message)}</li>`).join("") + `</ul></details>`;
-  const body = `<h2>Overview</h2><p>${escHtml(change.repository.name)}: comparing <code>${escHtml(shortRev(change.baseRevision))}</code> to <code>${escHtml(shortRev(change.headRevision))}</code> \u2014 ${countText}.</p><h3>Commit timeline</h3>` + timeline(change.changeUnits) + limitations;
-  return { navLabel: "Overview", body };
+  const body = chapterHead("Overview", escHtml(OVERVIEW_QUESTION)) + `<p>${escHtml(change.repository.name)}: ${countText} from <code>${escHtml(shortRev(change.baseRevision))}</code> to <code>${escHtml(shortRev(change.headRevision))}</code>.</p><h3>Commit timeline</h3>` + timeline(change.changeUnits) + limitations;
+  return { navLabel: "Overview", group: "change", body };
 }
-function changeUnitChapter(unit, change, options) {
+function changeUnitChapter(unit, number, change, options) {
   const entityIds = new Set(unit.entities ?? []);
   const entities = change.entities.filter((entity) => entityIds.has(entity.id));
   const relationshipIds = new Set(unit.relationships ?? []);
   const relationships = unit.relationships !== void 0 ? change.relationships.filter((rel) => relationshipIds.has(rel.id)) : change.relationships.filter(
     (rel) => entityIds.has(rel.from) && entityIds.has(rel.to)
   );
-  const caption = unit.summary ?? unit.technicalTitle;
   const figure = diagramFigure(
     { kind: "change", entities, relationships, changeUnit: unit },
     options.renderDiagram,
-    caption
+    ""
   );
+  const badge = unit.provenance === "inferred" ? INFERRED_BADGE : "";
+  let lede = "";
+  if (unit.summary) {
+    lede = `${escHtml(unit.summary)}${badge === "" ? "" : ` ${badge}`}`;
+  } else if (badge !== "") {
+    lede = badge;
+  }
   let narration = "";
   if (unit.beforeDescription) {
     narration += `<p><strong>Before:</strong> ${escHtml(unit.beforeDescription)}</p>`;
@@ -8429,9 +8475,6 @@ function changeUnitChapter(unit, change, options) {
   }
   if (unit.userImpact) {
     narration += `<p><strong>For users:</strong> ${escHtml(unit.userImpact)}</p>`;
-  }
-  if (unit.provenance === "inferred") {
-    narration += `<p class="muted">\u25C7 AI interpretation</p>`;
   }
   if (unit.openQuestions && unit.openQuestions.length > 0) {
     narration += `<h3>Open questions</h3><ul>` + unit.openQuestions.map((q) => `<li>? ${escHtml(q)}</li>`).join("") + `</ul>`;
@@ -8444,8 +8487,13 @@ function changeUnitChapter(unit, change, options) {
     ...unit.evidence ?? [],
     ...entities.flatMap((entity) => entity.evidence ?? [])
   ];
-  const body = `<h2>${escHtml(unitTitle(unit))}</h2>` + figure + narration + unchanged + evidenceDetails(anchors);
-  return { navLabel: unitTitle(unit), body };
+  const title = unitTitle(unit);
+  const body = chapterHead(title, lede) + figure + narration + unchanged + evidenceDetails(anchors);
+  return {
+    navLabel: `${number} \xB7 ${shortNavLabel(title)}`,
+    group: "change",
+    body
+  };
 }
 function entityList(entities) {
   const items = entities.map((entity) => {
@@ -8469,10 +8517,12 @@ function relationshipList(change) {
   return `<h3>Connections</h3><ul class="relationships">${items}</ul>`;
 }
 function bookChapter(chapter, change, options) {
-  const heading = `<h2>${escHtml(chapter.title)}</h2>`;
+  const heading = chapterHead(chapter.title, escHtml(CHAPTER_QUESTIONS[chapter.id]));
+  const navLabel = shortNavLabel(chapter.title);
   if (chapter.status === "not-written") {
     return {
-      navLabel: chapter.title,
+      navLabel,
+      group: "book",
       body: heading + `<p class="muted">Not yet written.</p>`
     };
   }
@@ -8507,7 +8557,7 @@ function bookChapter(chapter, change, options) {
       body += `<p class="muted">Not yet written.</p>`;
       break;
   }
-  return { navLabel: chapter.title, body };
+  return { navLabel, group: "book", body };
 }
 function pager(index, count) {
   const prev = index > 0 ? `<label class="pager-prev" for="c${index - 1}">\u2190 Previous</label>` : "";
@@ -8520,7 +8570,7 @@ function stylesheet(chapterCount) {
   for (let i = 0; i < chapterCount; i++) {
     reveal.push(`#c${i}:checked~#p${i}{display:block}`);
     reveal.push(
-      `#c${i}:checked~nav label[for="c${i}"]{color:#1d4ed8;border-color:#1d4ed8}`
+      `#c${i}:checked~nav label[for="c${i}"]{color:#1d4ed8;border-color:#1d4ed8;background:#eff6ff;font-weight:600}`
     );
     reveal.push(
       `#c${i}:focus-visible~nav label[for="c${i}"]{outline:2px solid #1d4ed8;outline-offset:2px}`
@@ -8531,22 +8581,31 @@ function stylesheet(chapterCount) {
     `*,*::before,*::after{box-sizing:border-box}`,
     `body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1f2937;background:#ffffff;line-height:1.6}`,
     `header,main{max-width:52rem;margin:0 auto;padding:0 1.25rem}`,
-    `header{padding-top:2.5rem}`,
     // Long repo-controlled tokens (paths, identifiers) must wrap so 320px
     // never scrolls horizontally.
     `h1,h2,h3,p,label,summary,figcaption{overflow-wrap:anywhere}`,
     // Skip link: clipped off-screen but focusable; revealed on focus.
     `.skip-link{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%)}`,
     `.skip-link:focus{position:fixed;top:0.5rem;left:0.5rem;width:auto;height:auto;margin:0;overflow:visible;clip:auto;clip-path:none;background:#ffffff;color:#1d4ed8;padding:0.5rem 1rem;border:1px solid #1d4ed8;border-radius:4px}`,
-    `h1{font-size:1.5rem;font-weight:600;margin:0 0 0.25rem}`,
-    `h2{font-size:1.25rem;font-weight:600;margin:2rem 0 0.75rem}`,
-    `h3{font-size:1rem;font-weight:600;margin:1.5rem 0 0.5rem}`,
+    // Masthead: small eyebrow, medium repo name, small muted subtitle with
+    // the shortened revisions as secondary evidence.
+    `header{padding-top:2.5rem}`,
+    `.masthead-kicker{margin:0 0 0.25rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280}`,
+    `h1{font-size:1.125rem;font-weight:600;margin:0}`,
+    `.subtitle{color:#6b7280;font-size:0.8125rem;margin:0.375rem 0 0}`,
+    `.subtitle .rev{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.75rem;color:#9ca3af;overflow-wrap:anywhere}`,
+    // Type scale: large chapter heading > medium masthead > small metadata.
+    `h2{font-size:1.5rem;font-weight:600;letter-spacing:-0.015em;margin:2.5rem 0 0.25rem}`,
+    `.chapter-sub{color:#6b7280;font-size:1rem;margin:0.25rem 0 1.75rem}`,
+    `h3{font-size:0.75rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;margin:2rem 0 0.75rem}`,
     `p{margin:0.75rem 0}`,
     `.muted{color:#6b7280}`,
-    `.subtitle{color:#6b7280;margin:0 0 1.5rem}`,
     `code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.875em;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}`,
     `ul,ol{margin:0.5rem 0;padding-left:1.5rem}`,
     `li{margin:0.25rem 0;overflow-wrap:anywhere}`,
+    // Provenance markers: glyph + text + title attribute; never colour-only.
+    `.badge{display:inline-block;font-size:0.6875rem;line-height:1.7;color:#6b7280;border:1px solid #d1d5db;border-radius:999px;padding:0 0.5rem;vertical-align:middle}`,
+    `.prov{color:#6b7280;font-size:0.875em}`,
     // Diagram-first: figures get room and dominate the chapter.
     // overflow-x:auto keeps an oversized diagram scrolling inside its own
     // figure instead of widening the page at 320px.
@@ -8554,16 +8613,31 @@ function stylesheet(chapterCount) {
     `figure.diagram svg{display:block;max-width:100%;height:auto}`,
     `figure.diagram-placeholder{display:flex;align-items:center;justify-content:center;min-height:8rem;background:#f9fafb}`,
     `.caption{margin:1.5rem 0 0.5rem;font-size:1.0625rem}`,
+    // Vertical commit timeline: hairline spine, one node per change unit.
+    `ol.timeline{list-style:none;margin:1rem 0 0.5rem;padding:0}`,
+    `ol.timeline li{position:relative;margin:0 0 0 0.375rem;padding:0 0 1.25rem 1.375rem;border-left:1px solid #e5e7eb}`,
+    `ol.timeline li:last-child{border-left-color:transparent;padding-bottom:0.25rem}`,
+    `ol.timeline li::before{content:"";position:absolute;top:0.375rem;left:-0.34375rem;width:0.625rem;height:0.625rem;border-radius:50%;background:#ffffff;border:1px solid #6b7280}`,
+    `.timeline-title{font-weight:500}`,
+    `code.timeline-sha{background:transparent;border:none;padding:0;color:#9ca3af;font-size:0.75rem}`,
     // Evidence stays collapsed and quiet.
     `details{margin:1.5rem 0;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem 1rem}`,
     `summary{cursor:pointer;color:#6b7280}`,
     `ul.evidence{list-style:none;padding-left:0}`,
+    // Housekeeping commits: quieter than regular evidence details.
+    `details.housekeeping{border:none;border-radius:0;padding:0;margin:0.25rem 0 0}`,
+    `details.housekeeping summary{font-size:0.8125rem}`,
     // Scriptless chapter switching: visually hidden but focusable radios.
     `input[name="chapter"]{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%)}`,
-    `nav{display:flex;flex-wrap:wrap;gap:0.25rem 1rem;margin:1rem 0 1.5rem;border-bottom:1px solid #e5e7eb;padding-bottom:0.75rem}`,
-    `nav label{cursor:pointer;color:#6b7280;padding:0.25rem 0;border-bottom:2px solid transparent}`,
-    `nav label:hover{color:#1f2937}`,
-    `main > section{display:none;padding-bottom:3rem}`,
+    // Navigation: two labelled clusters of compact pills, clearly separated
+    // from the content below.
+    `nav{display:flex;flex-direction:column;gap:1rem;margin:1.5rem 0 1rem;border-bottom:1px solid #e5e7eb;padding-bottom:1.5rem}`,
+    `.nav-group-label{margin:0 0 0.5rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280}`,
+    `.nav-pills{display:flex;flex-wrap:wrap;gap:0.375rem}`,
+    `nav label{cursor:pointer;color:#4b5563;font-size:0.8125rem;line-height:1.5;padding:0.25rem 0.75rem;border:1px solid #e5e7eb;border-radius:999px;background:#ffffff}`,
+    `nav label:hover{color:#1f2937;border-color:#d1d5db;background:#f9fafb}`,
+    // Content: readable measure, clear separation from the nav.
+    `main > section{display:none;max-width:70ch;padding-bottom:4rem}`,
     // Previous/Next: quiet bordered labels at the chapter foot; Next hugs the
     // right edge even when Previous is absent (first chapter).
     `.pager{display:flex;gap:0.75rem;margin-top:2.5rem;border-top:1px solid #e5e7eb;padding-top:1rem}`,
@@ -8574,24 +8648,35 @@ function stylesheet(chapterCount) {
   ].join("\n");
 }
 var CSP_CONTENT = "default-src 'none'; style-src 'unsafe-inline'; img-src data:;";
+function navCluster(groupLabel, items) {
+  if (items.length === 0) return "";
+  const pills = items.map((item) => `<label for="c${item.index}">${escHtml(item.label)}</label>`).join("");
+  return `<div class="nav-group"><p class="nav-group-label">${escHtml(groupLabel)}</p><div class="nav-pills">${pills}</div></div>`;
+}
 function renderChangeBook(book, change, options = {}) {
   const meaningful = change.changeUnits.filter((unit) => !unit.grouped);
   const chapters = [
     overviewChapter(change, meaningful),
-    ...meaningful.map((unit) => changeUnitChapter(unit, change, options)),
+    ...meaningful.map((unit, i) => changeUnitChapter(unit, i + 1, change, options)),
     ...book.chapters.map((chapter) => bookChapter(chapter, change, options))
   ];
   const inputs = chapters.map(
     (_, i) => `<input type="radio" name="chapter" id="c${i}"${i === 0 ? " checked" : ""}>`
   ).join("");
-  const nav = `<nav aria-label="Chapters">` + chapters.map((chapter, i) => `<label for="c${i}">${escHtml(chapter.navLabel)}</label>`).join("") + `</nav>`;
+  const withIndex = chapters.map((chapter, index) => ({
+    index,
+    label: chapter.navLabel,
+    group: chapter.group
+  }));
+  const nav = `<nav aria-label="Chapters">` + navCluster("This change", withIndex.filter((c) => c.group === "change")) + navCluster("The book", withIndex.filter((c) => c.group === "book")) + `</nav>`;
   const sections = chapters.map(
     (chapter, i) => `<section id="p${i}">${chapter.body}${pager(i, chapters.length)}</section>`
   ).join("");
-  const title = escHtml(`${change.repository.name} \u2014 change book`);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_CONTENT}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${stylesheet(chapters.length)}</style></head><body><a class="skip-link" href="#main">Skip to content</a><header><h1>${escHtml(change.repository.name)}</h1><p class="subtitle">${escHtml(shortRev(change.baseRevision))} \u2192 ${escHtml(
-    shortRev(change.headRevision)
-  )}</p></header><main id="main">` + inputs + nav + sections + `</main></body></html>`;
+  const displayName = options.repoName ?? change.repository.name;
+  const title = escHtml(`${displayName} \u2014 change book`);
+  const count = meaningful.length;
+  const subtitle = `${count} change${count === 1 ? "" : "s"} \xB7 <span class="rev">${escHtml(shortRev(change.baseRevision))}</span> \u2192 <span class="rev">${escHtml(shortRev(change.headRevision))}</span>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_CONTENT}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${stylesheet(chapters.length)}</style></head><body><a class="skip-link" href="#main">Skip to content</a><header class="masthead"><p class="masthead-kicker">Change book</p><h1>${escHtml(displayName)}</h1><p class="subtitle">${subtitle}</p></header><main id="main">` + inputs + nav + sections + `</main></body></html>`;
 }
 
 // packages/cli/src/commands/compare.ts

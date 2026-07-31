@@ -114,9 +114,16 @@ describe("e2e: HTML book structure", () => {
   it("has a nav chapter per meaningful change; grouped commits are not chapters", () => {
     const nav = html.match(/<nav[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? "";
     expect(nav).not.toBe("");
+    // Nav labels are short controls: numbered and truncated on a word
+    // boundary. The full subject stays as the chapter heading.
+    expect(nav).toContain("1 · feat: add guest checkout route…");
+    expect(nav).toContain("2 · refactor: rename order service…");
     for (const subject of MEANINGFUL_SUBJECTS) {
-      expect(nav).toContain(subject);
+      expect(html).toContain(`<h2>${subject}</h2>`);
     }
+    // Grouped in two labelled clusters.
+    expect(nav).toContain("This change");
+    expect(nav).toContain("The book");
     expect(nav).not.toContain("fixup!");
     expect(nav).not.toContain("style: reformat orders routes");
     // Overview + 2 meaningful changes + the ten canonical book chapters.
@@ -124,11 +131,18 @@ describe("e2e: HTML book structure", () => {
     expect(html.match(/<section id="p\d+">/g)).toHaveLength(13);
   });
 
-  it("keeps grouped commits in the timeline with their grouping visible", () => {
+  it("keeps meaningful commits as timeline nodes and grouped ones collapsed as housekeeping", () => {
     const timeline = html.match(/<ol class="timeline">[\s\S]*?<\/ol>/)?.[0] ?? "";
     expect(timeline).not.toBe("");
-    for (const subject of [...MEANINGFUL_SUBJECTS, ...GROUPED_SUBJECTS]) {
+    for (const subject of MEANINGFUL_SUBJECTS) {
       expect(timeline).toContain(subject);
+    }
+    const housekeeping =
+      html.match(/<details class="housekeeping">[\s\S]*?<\/details>/)?.[0] ?? "";
+    expect(housekeeping).not.toBe("");
+    expect(housekeeping).toContain("2 housekeeping commits");
+    for (const subject of GROUPED_SUBJECTS) {
+      expect(housekeeping).toContain(subject);
     }
   });
 

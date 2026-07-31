@@ -167,6 +167,45 @@ describe("native interactive controls", () => {
     }
   });
 
+  it("keeps the grouped nav clusters non-interactive text plus native label pills", () => {
+    const doc = parse(render());
+    const groups = Array.from(doc.querySelectorAll("nav .nav-group"));
+    expect(groups.length).toBe(2);
+    for (const group of groups) {
+      // The cluster heading is plain text — no role, no interactivity.
+      const heading = group.querySelector(".nav-group-label")!;
+      expect(heading.tagName.toLowerCase()).toBe("p");
+      expect(heading.hasAttribute("role")).toBe(false);
+      expect(heading.textContent.trim().length).toBeGreaterThan(0);
+      // Every control inside the cluster is a native label bound to a radio.
+      for (const label of Array.from(group.querySelectorAll("label"))) {
+        const target = doc.getElementById(label.getAttribute("for")!);
+        expect(target).not.toBeNull();
+        expect(target!.getAttribute("name")).toBe("chapter");
+      }
+    }
+  });
+
+  it("collapses housekeeping commits behind a native details/summary disclosure", () => {
+    const doc = parse(render(change({
+      changeUnits: [
+        ...change().changeUnits,
+        {
+          id: "unit-fixup",
+          technicalTitle: "fixup! tidy",
+          grouped: true,
+          groupedReason: "fixup commit",
+          commits: ["e".repeat(40)],
+          provenance: "derived"
+        }
+      ]
+    })));
+    const housekeeping = doc.querySelector("details.housekeeping");
+    expect(housekeeping).not.toBeNull();
+    expect(housekeeping!.querySelector("summary")).not.toBeNull();
+    expect(housekeeping!.hasAttribute("open")).toBe(false);
+  });
+
   it("gives every radio a visible focus indicator on its label", () => {
     const doc = parse(render());
     const style = css(render());

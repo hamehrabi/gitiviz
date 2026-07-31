@@ -184,6 +184,194 @@ describe("renderChangeBook document shell", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Masthead
+// ---------------------------------------------------------------------------
+
+describe("masthead", () => {
+  it("shows kicker, repository display name, and a human subtitle", () => {
+    const doc = parse(renderDemo());
+    const header = doc.querySelector("header.masthead");
+    expect(header).not.toBeNull();
+    expect(header!.querySelector(".masthead-kicker")!.textContent).toBe("Change book");
+    expect(header!.querySelector("h1")!.textContent).toBe("demo-app");
+    const subtitle = header!.querySelector(".subtitle")!;
+    expect(subtitle.textContent).toContain("2 changes");
+    expect(subtitle.textContent).toContain("aaaaaaaaaa → bbbbbbbbbb");
+  });
+
+  it("renders the shortened SHAs as secondary .rev spans, never raw 40-char SHAs", () => {
+    const doc = parse(renderDemo());
+    const revs = doc.querySelectorAll("header .subtitle .rev");
+    expect(revs.length).toBe(2);
+    expect(revs[0]!.textContent).toBe("aaaaaaaaaa");
+    expect(revs[1]!.textContent).toBe("bbbbbbbbbb");
+    expect(doc.querySelector("header")!.textContent).not.toContain("a".repeat(40));
+  });
+
+  it("prefers the repoName option for the display name and document title", () => {
+    const change = demoChange();
+    const doc = parse(
+      renderChangeBook(demoBook(change), change, { repoName: "Demo App" })
+    );
+    expect(doc.querySelector("header h1")!.textContent).toBe("Demo App");
+    expect(doc.querySelector("title")!.textContent).toBe("Demo App — change book");
+  });
+
+  it("escapes a hostile repoName option", () => {
+    const change = demoChange();
+    const html = renderChangeBook(demoBook(change), change, {
+      repoName: "<script>alert(1)</script>"
+    });
+    expect(html).not.toContain("<script>alert");
+    expect(parse(html).querySelectorAll("script").length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Navigation grouping and labels
+// ---------------------------------------------------------------------------
+
+describe("navigation grouping and labels", () => {
+  it("groups the nav into 'This change' and 'The book' clusters", () => {
+    const doc = parse(renderDemo());
+    const groups = doc.querySelectorAll("nav .nav-group");
+    expect(groups.length).toBe(2);
+    expect(groups[0]!.querySelector(".nav-group-label")!.textContent).toBe("This change");
+    expect(groups[1]!.querySelector(".nav-group-label")!.textContent).toBe("The book");
+    // Overview + 2 meaningful change units; the ten canonical book chapters.
+    expect(groups[0]!.querySelectorAll("label").length).toBe(3);
+    expect(groups[1]!.querySelectorAll("label").length).toBe(10);
+  });
+
+  it("numbers change-chapter nav labels and keeps them short", () => {
+    const doc = parse(renderDemo());
+    const labels = Array.from(doc.querySelectorAll("nav label")).map(
+      (label) => label.textContent
+    );
+    expect(labels[0]).toBe("Overview");
+    expect(labels[1]).toBe("1 · Guests can now check out");
+    expect(labels[2]).toBe("2 · refactor: rename order helpers");
+  });
+
+  it("truncates long titles on a word boundary in the nav; the heading keeps the full title", () => {
+    const change = demoChange();
+    change.changeUnits[0]!.humanTitle =
+      "Guests can now check out without creating an account first";
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const label = Array.from(doc.querySelectorAll("nav label")).find((l) =>
+      l.textContent.startsWith("1 · ")
+    )!;
+    expect(label.textContent).toBe("1 · Guests can now check out…");
+    const headings = Array.from(doc.querySelectorAll("h2")).map((h) => h.textContent);
+    expect(headings).toContain(
+      "Guests can now check out without creating an account first"
+    );
+  });
+
+  it("styles nav labels as compact pills with a clear active state", () => {
+    const css = parse(renderDemo()).querySelector("style")!.textContent;
+    expect(css).toMatch(/nav label\{[^}]*cursor:pointer/);
+    expect(css).toMatch(/nav label\{[^}]*border-radius:999px/);
+    // Active state pairs the checked radio with its nav pill.
+    expect(css).toContain('#c0:checked~nav label[for="c0"]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit timeline
+// ---------------------------------------------------------------------------
+
+describe("commit timeline", () => {
+  it("shows one node per meaningful unit using the narrated human title", () => {
+    const doc = parse(renderDemo());
+    const titles = Array.from(
+      doc.querySelector("ol.timeline")!.querySelectorAll(".timeline-title")
+    ).map((t) => t.textContent);
+    expect(titles).toEqual([
+      "Guests can now check out",
+      "refactor: rename order helpers"
+    ]);
+  });
+
+  it("attaches the short commit sha as muted evidence on each node", () => {
+    const doc = parse(renderDemo());
+    const shas = Array.from(
+      doc.querySelector("ol.timeline")!.querySelectorAll("code.timeline-sha")
+    ).map((c) => c.textContent);
+    expect(shas).toContain("ccccccc");
+    for (const sha of shas) expect(sha.length).toBe(7);
+  });
+
+  it("collapses grouped commits under a closed housekeeping details element", () => {
+    const doc = parse(renderDemo());
+    const overview = doc.querySelector("main > section")!;
+    const housekeeping = overview.querySelector("details.housekeeping");
+    expect(housekeeping).not.toBeNull();
+    expect(housekeeping!.hasAttribute("open")).toBe(false);
+    expect(housekeeping!.querySelector("summary")!.textContent).toBe(
+      "1 housekeeping commit"
+    );
+    expect(housekeeping!.textContent).toContain("fixup! feat: add guest checkout route");
+    // Grouped commits never appear as primary timeline nodes.
+    expect(overview.querySelector("ol.timeline")!.textContent).not.toContain("fixup!");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chapter questions
+// ---------------------------------------------------------------------------
+
+describe("chapter questions", () => {
+  it("puts the principal question under the overview heading", () => {
+    const doc = parse(renderDemo());
+    const overview = doc.querySelector("main > section")!;
+    expect(overview.querySelector(".chapter-sub")!.textContent).toBe(
+      "What changed, and why does it matter?"
+    );
+  });
+
+  it("gives every book chapter its principal question as a subtitle", () => {
+    const doc = parse(renderDemo());
+    const text = doc.body.textContent;
+    expect(text).toContain("Why does this system exist?");
+    expect(text).toContain("What are the parts, and how do they fit together?");
+    expect(text).toContain("How did it get here?");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Provenance markers
+// ---------------------------------------------------------------------------
+
+describe("provenance markers", () => {
+  it("marks derived evidence anchors with a ✓ glyph plus a title explanation", () => {
+    const doc = parse(renderDemo());
+    const marks = doc.querySelectorAll("ul.evidence .prov");
+    expect(marks.length).toBeGreaterThan(0);
+    for (const mark of Array.from(marks)) {
+      expect(mark.textContent).toBe("✓");
+      expect(mark.getAttribute("title")).toBeTruthy();
+    }
+  });
+
+  it("shows no ◇ marker when everything is derived (honest provenance)", () => {
+    expect(renderDemo()).not.toContain("◇");
+  });
+
+  it("badges narrated (inferred) chapters with ◇ AI interpretation and a title attribute", () => {
+    const change = demoChange();
+    change.changeUnits[0]!.provenance = "inferred";
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const badge = doc.querySelector(".badge.badge-inferred");
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toBe("◇ AI interpretation");
+    expect(badge!.getAttribute("title")).toContain("AI interpretation");
+    // The timeline node for the narrated unit carries the ◇ glyph too.
+    expect(doc.querySelector("ol.timeline")!.textContent).toContain("◇");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Chapters and CSS-only navigation
 // ---------------------------------------------------------------------------
 
