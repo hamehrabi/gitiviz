@@ -6598,7 +6598,10 @@ import { join as join2, resolve as resolve2 } from "node:path";
 
 // packages/cli/src/commands/compare.ts
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename as basename2, join, resolve } from "node:path";
+import { join } from "node:path";
+
+// packages/cli/src/repo-name.ts
+import { basename, resolve } from "node:path";
 
 // packages/git/src/exec.ts
 import { execFile } from "node:child_process";
@@ -6672,6 +6675,18 @@ async function mergeBase(repoDir, refA, refB) {
   const { stdout } = await gitRaw(repoDir, ["merge-base", shaA, shaB]);
   return stdout.trim();
 }
+async function remoteOriginUrl(repoDir) {
+  try {
+    const { stdout } = await gitRaw(repoDir, ["remote", "get-url", "origin"]);
+    const url = stdout.trim();
+    return url === "" ? null : url;
+  } catch (error) {
+    if (error instanceof GitError) {
+      return null;
+    }
+    throw error;
+  }
+}
 
 // packages/git/src/diff.ts
 var WORKTREE = "WORKTREE";
@@ -6741,6 +6756,31 @@ async function diffRange(repoDir, baseRef, headRef) {
       return change;
     })
   );
+}
+
+// packages/cli/src/repo-name.ts
+function repoNameFromRemoteUrl(url) {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (trimmed === "") return null;
+  const segment = trimmed.split(/[/:]/).pop() ?? "";
+  const name = segment.replace(/\.git$/i, "").trim();
+  return name === "" ? null : name;
+}
+function nonEmpty(value) {
+  const trimmed = value?.trim() ?? "";
+  return trimmed === "" ? null : trimmed;
+}
+async function resolveRepoName(inputs, getRemoteUrl = remoteOriginUrl) {
+  const flag = nonEmpty(inputs.nameFlag);
+  if (flag !== null) return flag;
+  const env = nonEmpty(inputs.envName);
+  if (env !== null) return env;
+  const url = await getRemoteUrl(inputs.repoDir);
+  if (url !== null) {
+    const fromRemote = repoNameFromRemoteUrl(url);
+    if (fromRemote !== null) return fromRemote;
+  }
+  return basename(resolve(inputs.repoDir));
 }
 
 // packages/analyzers/src/types.ts
@@ -7088,7 +7128,7 @@ function entityId(kind, technicalLabel) {
 function relationshipId(verb, from, to) {
   return createHash("sha1").update(`rel\0${verb}\0${from}\0${to}`).digest("hex").slice(0, 12);
 }
-function basename(path) {
+function basename2(path) {
   const segments = path.split("/");
   return segments[segments.length - 1] ?? path;
 }
@@ -7100,7 +7140,7 @@ function groupDirOf(path) {
 }
 function groupLabelOf(dir) {
   if (dir === ".") return "Project root";
-  const last = basename(dir);
+  const last = basename2(dir);
   if (last.length === 0) return dir;
   return last.charAt(0).toUpperCase() + last.slice(1);
 }
@@ -7185,7 +7225,7 @@ function buildEvidenceGraph(input) {
     entities.set(id, {
       id,
       kind: "file",
-      humanLabel: basename(fc.path),
+      humanLabel: basename2(fc.path),
       technicalLabel: fc.path,
       ...statesOf(inBase, inHead, changed),
       provenance: "derived",
@@ -8784,8 +8824,11 @@ function mergeNarration(change, response, source) {
   }
   return merged.value;
 }
-async function renderToDist(outDir, book, change, io) {
-  const html = renderChangeBook(book, change, { renderDiagram: compileDiagram });
+async function renderToDist(outDir, book, change, io, repoName) {
+  const html = renderChangeBook(book, change, {
+    renderDiagram: compileDiagram,
+    ...repoName !== void 0 ? { repoName } : {}
+  });
   await mkdir(join(outDir, "dist"), { recursive: true });
   const htmlPath = join(outDir, "dist", "index.html");
   await writeFile(htmlPath, html, "utf8");
@@ -8793,6 +8836,7 @@ async function renderToDist(outDir, book, change, io) {
 }
 async function runCompare(options) {
   const { repoDir, outDir, baseRef, headRef, io } = options;
+  const repoName = options.repoName ?? await resolveRepoName({ repoDir });
   const baseSha = await resolveRef(repoDir, baseRef);
   const headIsWorktree = headRef === WORKTREE;
   const headSha = headIsWorktree ? WORKTREE : await resolveRef(repoDir, headRef);
@@ -8811,7 +8855,7 @@ async function runCompare(options) {
   });
   const manifest = {
     specVersion: SPEC_VERSION,
-    repository: { name: basename2(resolve(repoDir)) },
+    repository: { name: repoName },
     baseRevision: baseSha,
     headRevision: headSha,
     entities: graph.entities,
@@ -8863,7 +8907,7 @@ async function runCompare(options) {
     narrated = applyTemplateNarration(manifest);
     io.out("no narration-response.json \u2014 used the deterministic template narrator");
   }
-  await renderToDist(outDir, book, narrated, io);
+  await renderToDist(outDir, book, narrated, io, repoName);
 }
 async function refExists(repoDir, ref) {
   try {
@@ -8886,7 +8930,14 @@ async function runBranch(options) {
     }
   }
   const baseSha = await mergeBase(repoDir, base, "HEAD");
-  await runCompare({ repoDir, outDir, baseRef: baseSha, headRef: "HEAD", io });
+  await runCompare({
+    repoDir,
+    outDir,
+    baseRef: baseSha,
+    headRef: "HEAD",
+    ...options.repoName !== void 0 ? { repoName: options.repoName } : {},
+    io
+  });
 }
 async function runCommit(options) {
   const headSha = await resolveRef(options.repoDir, options.ref);
@@ -8895,6 +8946,7 @@ async function runCommit(options) {
     outDir: options.outDir,
     baseRef: `${headSha}~1`,
     headRef: headSha,
+    ...options.repoName !== void 0 ? { repoName: options.repoName } : {},
     io: options.io
   });
 }
@@ -8912,30 +8964,35 @@ async function runApplyNarration(options) {
   );
   const narrated = mergeNarration(change, responseRaw, responsePath);
   io.out(`merged narration from ${responsePath}`);
-  await renderToDist(outDir, book, narrated, io);
+  await renderToDist(outDir, book, narrated, io, options.repoName);
 }
 
 // packages/cli/src/index.ts
 var USAGE = `Usage:
-  gitiviz compare <base> <head> [--repo DIR] [--out DIR]
-  gitiviz branch [base]         [--repo DIR] [--out DIR]
-  gitiviz commit <sha>          [--repo DIR] [--out DIR]
+  gitiviz compare <base> <head> [--repo DIR] [--out DIR] [--name NAME]
+  gitiviz branch [base]         [--repo DIR] [--out DIR] [--name NAME]
+  gitiviz commit <sha>          [--repo DIR] [--out DIR] [--name NAME]
   gitiviz validate                          [--out DIR]
-  gitiviz apply-narration                   [--out DIR]
+  gitiviz apply-narration                   [--out DIR] [--name NAME]
 
   --repo DIR   git repository to analyze (default: current directory)
-  --out DIR    output directory (default: <repo>/.gitiviz)`;
+  --out DIR    output directory (default: <repo>/.gitiviz)
+  --name NAME  repository display name (default: GITIVIZ_REPO_NAME env,
+               else the origin remote's repo name, else the directory name)`;
 function parseArgs(argv) {
   const parsed = { positionals: [] };
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
-    if (token === "--repo" || token === "--out") {
+    if (token === "--repo" || token === "--out" || token === "--name") {
       const value = argv[++i];
       if (value === void 0 || value.startsWith("--")) {
-        throw new Error(`${token} needs a directory argument`);
+        throw new Error(
+          `${token} needs ${token === "--name" ? "a value" : "a directory argument"}`
+        );
       }
       if (token === "--repo") parsed.repo = value;
-      else parsed.out = value;
+      else if (token === "--out") parsed.out = value;
+      else parsed.name = value;
     } else if (token.startsWith("--")) {
       throw new Error(`unknown option "${token}"`);
     } else {
@@ -8958,7 +9015,7 @@ var defaultIo = {
   err: (text) => process.stderr.write(`${text}
 `)
 };
-async function runCli(argv, io = defaultIo) {
+async function runCli(argv, io = defaultIo, env = process.env) {
   let parsed;
   try {
     parsed = parseArgs(argv);
@@ -8970,22 +9027,31 @@ async function runCli(argv, io = defaultIo) {
   const [command, ...rest] = parsed.positionals;
   const repoDir = resolve2(parsed.repo ?? ".");
   const outDir = resolve2(parsed.out ?? join2(repoDir, ".gitiviz"));
+  const explicitName = [parsed.name, env["GITIVIZ_REPO_NAME"]].map((v) => v?.trim() ?? "").find((v) => v !== "") ?? void 0;
+  const named = explicitName !== void 0 ? { repoName: explicitName } : {};
   try {
     switch (command) {
       case "compare":
         expectArgs("compare", rest, 2, 2);
-        await runCompare({ repoDir, outDir, baseRef: rest[0], headRef: rest[1], io });
+        await runCompare({
+          repoDir,
+          outDir,
+          baseRef: rest[0],
+          headRef: rest[1],
+          ...named,
+          io
+        });
         return 0;
       case "branch": {
         expectArgs("branch", rest, 0, 1);
-        const options = { repoDir, outDir, io };
+        const options = { repoDir, outDir, ...named, io };
         if (rest[0] !== void 0) options.baseRef = rest[0];
         await runBranch(options);
         return 0;
       }
       case "commit":
         expectArgs("commit", rest, 1, 1);
-        await runCommit({ repoDir, outDir, ref: rest[0], io });
+        await runCommit({ repoDir, outDir, ref: rest[0], ...named, io });
         return 0;
       case "validate":
         expectArgs("validate", rest, 0, 0);
@@ -8993,7 +9059,7 @@ async function runCli(argv, io = defaultIo) {
         return 0;
       case "apply-narration":
         expectArgs("apply-narration", rest, 0, 0);
-        await runApplyNarration({ outDir, io });
+        await runApplyNarration({ outDir, ...named, io });
         return 0;
       case void 0:
         io.err("gitiviz: no command given");

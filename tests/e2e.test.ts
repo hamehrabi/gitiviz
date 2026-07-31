@@ -60,8 +60,13 @@ let io: CapturedIo;
 let html: string;
 let change: ChangeManifest;
 
+/** The demo repo gets a realistic origin: the book must carry this name. */
+const ORIGIN_URL = "https://github.com/acme/demo-shop.git";
+const EXPECTED_REPO_NAME = "demo-shop";
+
 beforeAll(async () => {
   repo = await makeDemoRepo();
+  await runGit(repo, ["remote", "add", "origin", ORIGIN_URL]);
   out = await mkdtemp(join(tmpdir(), "gitiviz-e2e-"));
   io = captureIo();
   exitCode = await runCli(
@@ -82,6 +87,14 @@ describe("e2e: manifests", () => {
     expect(changeResult.ok, JSON.stringify(changeResult)).toBe(true);
     const bookResult = validateBookManifest(await readJson(join(out, "manifests", "book.json")));
     expect(bookResult.ok, JSON.stringify(bookResult)).toBe(true);
+  });
+
+  it("a repo with an origin remote is named after the remote, not its directory", () => {
+    // The temp checkout's directory is "gitiviz-e2e-…" (and "/repo" in the
+    // plugin's Docker fallback) — the book must use the real project name.
+    expect(change.repository.name).toBe(EXPECTED_REPO_NAME);
+    expect(html).toContain(`<h1>${EXPECTED_REPO_NAME}</h1>`);
+    expect(html).toContain(`<title>${EXPECTED_REPO_NAME} — change book</title>`);
   });
 
   it("every evidence anchor points at a real path in the fixture repo", async () => {

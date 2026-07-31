@@ -23,7 +23,8 @@
  * (JSON/argv only) and are escaped exclusively by the renderer.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { join } from "node:path";
+import { resolveRepoName } from "../repo-name.js";
 import {
   diffRange,
   gitRaw,
@@ -71,6 +72,12 @@ export interface CompareOptions {
   outDir: string;
   baseRef: string;
   headRef: string;
+  /**
+   * Repository display name (--name flag / GITIVIZ_REPO_NAME env, already
+   * resolved by the caller). When absent it is derived from the origin
+   * remote URL, falling back to the directory basename.
+   */
+  repoName?: string;
   io: CommandIo;
 }
 
@@ -234,9 +241,13 @@ async function renderToDist(
   outDir: string,
   book: BookManifest,
   change: ChangeManifest,
-  io: CommandIo
+  io: CommandIo,
+  repoName?: string
 ): Promise<void> {
-  const html = renderChangeBook(book, change, { renderDiagram: compileDiagram });
+  const html = renderChangeBook(book, change, {
+    renderDiagram: compileDiagram,
+    ...(repoName !== undefined ? { repoName } : {})
+  });
   await mkdir(join(outDir, "dist"), { recursive: true });
   const htmlPath = join(outDir, "dist", "index.html");
   await writeFile(htmlPath, html, "utf8");
@@ -249,6 +260,11 @@ async function renderToDist(
 
 export async function runCompare(options: CompareOptions): Promise<void> {
   const { repoDir, outDir, baseRef, headRef, io } = options;
+
+  // Display name: caller-resolved (--name / env) or origin-remote basename,
+  // last resort the directory basename ("repo" in the Docker fallback).
+  const repoName =
+    options.repoName ?? (await resolveRepoName({ repoDir }));
 
   // 1. Facts: diffs, analyzer facts, evidence graph, change units.
   const baseSha = await resolveRef(repoDir, baseRef);
@@ -270,7 +286,7 @@ export async function runCompare(options: CompareOptions): Promise<void> {
 
   const manifest: ChangeManifest = {
     specVersion: SPEC_VERSION,
-    repository: { name: basename(resolve(repoDir)) },
+    repository: { name: repoName },
     baseRevision: baseSha,
     headRevision: headSha,
     entities: graph.entities,
@@ -334,7 +350,7 @@ export async function runCompare(options: CompareOptions): Promise<void> {
   }
 
   // 5. Render.
-  await renderToDist(outDir, book, narrated, io);
+  await renderToDist(outDir, book, narrated, io, repoName);
 }
 
 export interface BranchOptions {
@@ -342,6 +358,8 @@ export interface BranchOptions {
   outDir: string;
   /** Explicit base ref; defaults to main/master. */
   baseRef?: string;
+  /** See CompareOptions.repoName. */
+  repoName?: string;
   io: CommandIo;
 }
 
@@ -368,13 +386,22 @@ export async function runBranch(options: BranchOptions): Promise<void> {
     }
   }
   const baseSha = await mergeBase(repoDir, base, "HEAD");
-  await runCompare({ repoDir, outDir, baseRef: baseSha, headRef: "HEAD", io });
+  await runCompare({
+    repoDir,
+    outDir,
+    baseRef: baseSha,
+    headRef: "HEAD",
+    ...(options.repoName !== undefined ? { repoName: options.repoName } : {}),
+    io
+  });
 }
 
 export interface CommitOptions {
   repoDir: string;
   outDir: string;
   ref: string;
+  /** See CompareOptions.repoName. */
+  repoName?: string;
   io: CommandIo;
 }
 
@@ -386,6 +413,7 @@ export async function runCommit(options: CommitOptions): Promise<void> {
     outDir: options.outDir,
     baseRef: `${headSha}~1`,
     headRef: headSha,
+    ...(options.repoName !== undefined ? { repoName: options.repoName } : {}),
     io: options.io
   });
 }
@@ -403,6 +431,12 @@ export async function runValidate(options: ValidateOptions): Promise<void> {
 
 export interface ApplyNarrationOptions {
   outDir: string;
+  /**
+   * Explicit display-name override (--name / env only). Unlike compare there
+   * is no directory fallback here: the manifest on disk already carries the
+   * resolved name and re-deriving it from the cwd could regress it.
+   */
+  repoName?: string;
   io: CommandIo;
 }
 
@@ -420,5 +454,5 @@ export async function runApplyNarration(options: ApplyNarrationOptions): Promise
   );
   const narrated = mergeNarration(change, responseRaw, responsePath);
   io.out(`merged narration from ${responsePath}`);
-  await renderToDist(outDir, book, narrated, io);
+  await renderToDist(outDir, book, narrated, io, options.repoName);
 }

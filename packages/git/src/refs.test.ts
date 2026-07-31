@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeRepo, commitFile, runGit, removeRepo } from "@gitiviz/test-fixtures";
-import { resolveRef, mergeBase, currentBranch } from "./refs.js";
+import { resolveRef, mergeBase, currentBranch, remoteOriginUrl } from "./refs.js";
 
 const SHA40 = /^[0-9a-f]{40}$/;
 
@@ -63,6 +63,28 @@ describe("ref resolution", () => {
       expect(await currentBranch(detached)).toBeNull();
     } finally {
       await removeRepo(detached);
+    }
+  });
+
+  it("remoteOriginUrl is null in a repo without an origin remote", async () => {
+    expect(await remoteOriginUrl(repo)).toBeNull();
+  });
+
+  it("remoteOriginUrl returns the configured origin URL verbatim", async () => {
+    const withRemote = await makeRepo();
+    try {
+      await commitFile(withRemote, "x.txt", "x\n", "c1");
+      await runGit(withRemote, [
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/acme/widget-shop.git"
+      ]);
+      expect(await remoteOriginUrl(withRemote)).toBe(
+        "https://github.com/acme/widget-shop.git"
+      );
+    } finally {
+      await removeRepo(withRemote);
     }
   });
 });

@@ -80,6 +80,13 @@ if [[ -s "$FIXTURE/.gitiviz/manifests/change.json" \
 else
   fail "missing manifest / narration-request outputs under $FIXTURE/.gitiviz"
 fi
+# The repo is mounted at /repo inside the container; the launcher must pass
+# the host directory's real name so the book is not titled "repo".
+if grep -q "<h1>fixture</h1>" "$HTML"; then
+  pass "docker fallback titles the book after the host directory, not /repo"
+else
+  fail "expected <h1>fixture</h1> in $HTML, got: $(grep -o '<h1>[^<]*</h1>' "$HTML" || echo none)"
+fi
 
 # --- 3. neither node nor docker: actionable error, exit 1 ---------------
 STDERR_FILE="$WORK/stderr"

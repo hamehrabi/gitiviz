@@ -8,6 +8,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { basename } from "node:path";
 import {
   DEMO_FEATURE_BRANCH,
   HOSTILE_FILE,
@@ -227,6 +228,69 @@ describe("narration-response handling", () => {
     expect(exitCode, io.errText()).toBe(0);
     const html = await readFile(join(out, "dist", "index.html"), "utf8");
     expect(html).toContain("Renarrated title");
+  }, 60_000);
+});
+
+describe("repository display name resolution through the CLI", () => {
+  const compareArgs = (out: string): string[] => [
+    "compare",
+    "main",
+    DEMO_FEATURE_BRANCH,
+    "--repo",
+    demoRepo,
+    "--out",
+    out
+  ];
+
+  async function repoNameIn(out: string): Promise<string> {
+    const change = (await readJson(join(out, "manifests", "change.json"))) as ChangeManifest;
+    return change.repository.name;
+  }
+
+  it("--name flag beats the GITIVIZ_REPO_NAME env", async () => {
+    const out = await newOutDir();
+    const io = captureIo();
+    const exitCode = await runCli([...compareArgs(out), "--name", "flag-name"], io, {
+      GITIVIZ_REPO_NAME: "env-name"
+    });
+    expect(exitCode, io.errText()).toBe(0);
+    expect(await repoNameIn(out)).toBe("flag-name");
+  }, 60_000);
+
+  it("GITIVIZ_REPO_NAME env is used when no --name is given (Docker fallback)", async () => {
+    const out = await newOutDir();
+    const io = captureIo();
+    const exitCode = await runCli(compareArgs(out), io, {
+      GITIVIZ_REPO_NAME: "env-name"
+    });
+    expect(exitCode, io.errText()).toBe(0);
+    expect(await repoNameIn(out)).toBe("env-name");
+    const html = await readFile(join(out, "dist", "index.html"), "utf8");
+    expect(html).toContain("<h1>env-name</h1>");
+  }, 60_000);
+
+  it("falls back to the origin remote's repo name (strips .git), then dir basename", async () => {
+    const out = await newOutDir();
+    await runGit(demoRepo, [
+      "remote",
+      "add",
+      "origin",
+      "git@github.com:acme/demo-shop.git"
+    ]);
+    try {
+      const io = captureIo();
+      const exitCode = await runCli(compareArgs(out), io, {});
+      expect(exitCode, io.errText()).toBe(0);
+      expect(await repoNameIn(out)).toBe("demo-shop");
+    } finally {
+      await runGit(demoRepo, ["remote", "remove", "origin"]);
+    }
+
+    // Without a remote the directory basename remains the last resort.
+    const out2 = await newOutDir();
+    const io2 = captureIo();
+    expect(await runCli(compareArgs(out2), io2, {}), io2.errText()).toBe(0);
+    expect(await repoNameIn(out2)).toBe(basename(demoRepo));
   }, 60_000);
 });
 

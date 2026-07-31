@@ -1,5 +1,5 @@
 export { gitRaw, GitError, type GitResult } from "./exec.js";
-export { resolveRef, mergeBase, currentBranch } from "./refs.js";
+export { resolveRef, mergeBase, currentBranch, remoteOriginUrl } from "./refs.js";
 export {
   diffRange,
   diffCommit,

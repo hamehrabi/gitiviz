@@ -49,6 +49,24 @@ export async function mergeBase(
   return stdout.trim();
 }
 
+/**
+ * URL of the `origin` remote, or null when the repo has no origin.
+ * The returned string is repo-controlled and therefore hostile: callers
+ * may parse it but must never pass it through a shell or emit it unescaped.
+ */
+export async function remoteOriginUrl(repoDir: string): Promise<string | null> {
+  try {
+    const { stdout } = await gitRaw(repoDir, ["remote", "get-url", "origin"]);
+    const url = stdout.trim();
+    return url === "" ? null : url;
+  } catch (error) {
+    if (error instanceof GitError) {
+      return null; // no origin remote configured
+    }
+    throw error;
+  }
+}
+
 /** Current branch name, or null when HEAD is detached. */
 export async function currentBranch(repoDir: string): Promise<string | null> {
   try {
