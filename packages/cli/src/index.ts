@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * gitiviz CLI — zero-dependency arg parsing + command dispatch.
  *
@@ -10,11 +9,12 @@
  *
  * --repo defaults to the current directory; --out defaults to
  * <repo>/.gitiviz. All failures surface as one actionable stderr message and
- * exit code 1 — command implementations throw, only this file exits.
- * This module is also the esbuild entry for the bundled plugin script.
+ * exit code 1 — command implementations throw, callers exit.
+ * This module is a pure library; the executable entries are main.ts
+ * (full CLI, bundled as analyze.mjs) and apply-narration.ts (bundled as
+ * apply-narration.mjs).
  */
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import {
   runApplyNarration,
   runBranch,
@@ -138,12 +138,4 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
     io.err(`gitiviz: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
-}
-
-// Run when executed directly (node src/index.ts via tsx, or the bundled .mjs).
-if (
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
-  process.exitCode = await runCli(process.argv.slice(2));
 }

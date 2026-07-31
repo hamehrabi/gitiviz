@@ -1,28 +1,20 @@
-import { readFileSync } from "node:fs";
 import { Ajv, type ValidateFunction } from "ajv";
 import type { BookManifest, ChangeManifest } from "./types.js";
+/**
+ * The JSON Schemas in spec/ are the published contract. They are imported
+ * statically (not read from disk at runtime) so bundlers embed them and the
+ * resulting single-file artifact works from any location.
+ */
+import bookManifestSchema from "../../../spec/book-manifest.schema.json" with { type: "json" };
+import changeManifestSchema from "../../../spec/change-manifest.schema.json" with { type: "json" };
 
 export type ValidationResult<T> =
   | { ok: true; value: T }
   | { ok: false; errors: string[] };
 
-/**
- * The JSON Schemas in spec/ are the published contract; this module loads
- * them relative to the package so src (tests) and dist (build) both
- * resolve them.
- */
-function loadSpecSchema(name: string): object {
-  const url = new URL(`../../../spec/${name}`, import.meta.url);
-  return JSON.parse(readFileSync(url, "utf8"));
-}
-
 const ajv = new Ajv({ allErrors: true });
-const compiledChangeManifest: ValidateFunction = ajv.compile(
-  loadSpecSchema("change-manifest.schema.json")
-);
-const compiledBookManifest: ValidateFunction = ajv.compile(
-  loadSpecSchema("book-manifest.schema.json")
-);
+const compiledChangeManifest: ValidateFunction = ajv.compile(changeManifestSchema);
+const compiledBookManifest: ValidateFunction = ajv.compile(bookManifestSchema);
 
 /** Major spec versions this validator understands. */
 const SUPPORTED_SPEC_MAJOR = 0;

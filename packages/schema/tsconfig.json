@@ -2,8 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "rootDir": "src",
+    "resolveJsonModule": true,
+    "rootDir": "../..",
     "outDir": "dist"
   },
-  "include": ["src"]
+  "include": ["src", "../../spec/*.schema.json"]
 }
