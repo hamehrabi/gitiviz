@@ -668,6 +668,88 @@ describe("overview view", () => {
     expect(details).toBeDefined();
     expect(details!.hasAttribute("open")).toBe(false);
   });
+
+  function narratedOverviewChange(): ChangeManifest {
+    const change = demoChange();
+    change.projectNarration = {
+      summary: "A demo shop that now sells to guests.",
+      provenance: "inferred",
+      confidence: 0.9
+    };
+    change.chapterNarrations = {
+      purpose: {
+        summary: "Why the shop exists.",
+        keyPoints: ["Sell things fast.", "Let anyone check out."],
+        provenance: "inferred",
+        confidence: 0.9
+      }
+    };
+    return change;
+  }
+
+  it("narrated overview fixture stays schema-valid", () => {
+    expect(validateChangeManifest(narratedOverviewChange()).ok).toBe(true);
+  });
+
+  it("leads with the ◇ project narration above the derived count line", () => {
+    const change = narratedOverviewChange();
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const overview = doc.querySelector("#overview")!;
+    const lead = overview.querySelector("p.lead");
+    expect(lead).not.toBeNull();
+    expect(lead!.textContent).toContain("A demo shop that now sells to guests.");
+    const mark = lead!.querySelector(".prov");
+    expect(mark).not.toBeNull();
+    expect(mark!.textContent).toBe("◇");
+    const html = overview.innerHTML;
+    expect(html.indexOf('class="lead"')).toBeLessThan(
+      html.indexOf("meaningful change")
+    );
+  });
+
+  it("renders Why-it-exists key points, ◇ each, after the count line", () => {
+    const change = narratedOverviewChange();
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const overview = doc.querySelector("#overview")!;
+    const heading = Array.from(overview.querySelectorAll("h3")).find(
+      (h) => h.textContent === "Why it exists"
+    );
+    expect(heading).toBeDefined();
+    const points = Array.from(overview.querySelectorAll("ul.keypoints li"));
+    expect(points.map((p) => p.textContent.replace("◇", "").trim())).toEqual([
+      "Sell things fast.",
+      "Let anyone check out."
+    ]);
+    for (const point of points) {
+      expect(point.querySelector(".prov")!.textContent).toBe("◇");
+    }
+    const html = overview.innerHTML;
+    expect(html.indexOf("meaningful change")).toBeLessThan(
+      html.indexOf("Why it exists")
+    );
+  });
+
+  it("renders neither narration slot when un-narrated (honest absence)", () => {
+    const doc = parse(renderDemo());
+    const overview = doc.querySelector("#overview")!;
+    expect(overview.querySelector("p.lead")).toBeNull();
+    expect(overview.querySelector("ul.keypoints")).toBeNull();
+    expect(overview.textContent).not.toContain("Why it exists");
+  });
+
+  it("escapes hostile narration text in the lead and key points", () => {
+    const change = narratedOverviewChange();
+    change.projectNarration!.summary = '<script>alert("lead")</script>';
+    change.chapterNarrations!.purpose!.keyPoints = ['"><img src=x onerror=alert(1)>'];
+    const html = renderChangeBook(demoBook(change), change);
+    expect(html).not.toContain('<script>alert("lead")');
+    expect(html).not.toContain("<img src=x");
+    const doc = parse(html);
+    expect(doc.querySelectorAll("script").length).toBe(0);
+    expect(doc.querySelector("#overview p.lead")!.textContent).toContain(
+      '<script>alert("lead")</script>'
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

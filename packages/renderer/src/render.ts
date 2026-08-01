@@ -618,7 +618,11 @@ function commitPageSection(
   });
 }
 
-/** Overview: what the repo is + a brief summary of this change. */
+/**
+ * Overview: the narrated project lead (◇), the derived comparison line,
+ * the narrated "Why it exists" key points (◇ each), what the repo is, and
+ * the commit timeline. Honest absence: un-narrated slots render nothing.
+ */
 function overviewView(
   book: BookManifest,
   change: ChangeManifest,
@@ -626,6 +630,20 @@ function overviewView(
 ): string {
   const count = meaningful.length;
   const countText = `${count} meaningful change${count === 1 ? "" : "s"}`;
+  const lead =
+    change.projectNarration === undefined
+      ? ""
+      : `<p class="lead">${INFERRED_MARK} ` +
+        `${escHtml(change.projectNarration.summary)}</p>`;
+  const purposePoints = change.chapterNarrations?.purpose?.keyPoints ?? [];
+  const whyItExists =
+    purposePoints.length === 0
+      ? ""
+      : `<h3>Why it exists</h3><ul class="keypoints">` +
+        purposePoints
+          .map((point) => `<li>${INFERRED_MARK} ${escHtml(point)}</li>`)
+          .join("") +
+        `</ul>`;
   const purposeChapter = book.chapters.find((chapter) => chapter.id === "purpose");
   const systems = change.entities.filter((entity) => entity.kind === "system");
   const purpose =
@@ -642,9 +660,11 @@ function overviewView(
         `</ul></details>`;
   return (
     viewHead("Overview", escHtml(OVERVIEW_QUESTION)) +
+    lead +
     `<p>${escHtml(change.repository.name)}: ${countText} from ` +
     `<code>${escHtml(shortRev(change.baseRevision))}</code> to ` +
     `<code>${escHtml(shortRev(change.headRevision))}</code>.</p>` +
+    whyItExists +
     purpose +
     `<h3>Commit timeline</h3>` +
     timeline(change.changeUnits) +
@@ -839,6 +859,11 @@ function shellCss(): string {
       `color:#6b7280;margin:2rem 0 0.75rem}`,
     `p{margin:0.75rem 0}`,
     `.muted{color:#6b7280}`,
+    // Narrated leads (◇): one breath of AI interpretation above the facts.
+    `p.lead{font-size:1.0625rem;margin:0 0 1rem}`,
+    // Narrated key points (◇ per item — the glyph is the list marker).
+    `ul.keypoints{list-style:none;margin:0.5rem 0 1rem;padding-left:0}`,
+    `ul.keypoints li{margin:0.375rem 0}`,
     `code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.875em;` +
       `background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}`,
     `ul,ol{margin:0.5rem 0;padding-left:1.5rem}`,
