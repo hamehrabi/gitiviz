@@ -54,10 +54,10 @@ describe(".claude-plugin/marketplace.json", () => {
 });
 
 describe("commands/", () => {
-  const EXPECTED = ["branch.md", "commit.md", "compare.md", "open.md"];
+  const EXPECTED = ["branch.md", "commit.md", "compare.md", "init.md", "open.md"];
   const files = readdirSync(commandsDir).filter((f) => f.endsWith(".md")).sort();
 
-  it("contains exactly the four v0.1 slash commands", () => {
+  it("contains exactly the five slash commands", () => {
     expect(files).toEqual(EXPECTED);
   });
 

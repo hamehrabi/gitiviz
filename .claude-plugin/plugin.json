@@ -6,5 +6,6 @@
     "url": "https://github.com/hamehrabi"
   },
   "repository": "https://github.com/hamehrabi/gitiviz",
-  "license": "MIT"
+  "license": "MIT",
+  "hooks": "./plugins/claude-code/hooks/hooks.json"
 }

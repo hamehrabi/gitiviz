@@ -396,6 +396,67 @@ export async function runBranch(options: BranchOptions): Promise<void> {
   });
 }
 
+export interface InitOptions {
+  repoDir: string;
+  outDir: string;
+  /** How many trailing commits to analyze (clamped to the history). */
+  commits: number;
+  /** See CompareOptions.repoName. */
+  repoName?: string;
+  io: CommandIo;
+}
+
+/**
+ * Bootstrap the story loop: run the full pipeline over the last N commits
+ * (clamped to the available history) and print the narration next steps.
+ * This is the engine half of /gitiviz:init — the agent half reads
+ * narration-request.json and writes narration-response.json.
+ */
+export async function runInit(options: InitOptions): Promise<void> {
+  const { repoDir, outDir, commits, io } = options;
+  const headSha = await resolveRef(repoDir, "HEAD");
+  const { stdout } = await gitRaw(repoDir, ["rev-list", "--count", headSha]);
+  const commitCount = Number(stdout.trim());
+  if (!Number.isInteger(commitCount) || commitCount < 2) {
+    throw new Error(
+      "this repository has fewer than 2 commits — gitiviz init needs at least 2 commits " +
+        "to build a change range. Make another commit and rerun."
+    );
+  }
+  // First-parent depth: HEAD~span must exist even across merges, so clamp to
+  // the first-parent chain length rather than the full rev-list count.
+  const { stdout: firstParentOut } = await gitRaw(repoDir, [
+    "rev-list",
+    "--count",
+    "--first-parent",
+    headSha
+  ]);
+  const firstParentDepth = Number(firstParentOut.trim());
+  const span = Math.min(commits, firstParentDepth - 1);
+  const baseSha = await resolveRef(repoDir, `${headSha}~${span}`);
+  io.out(`analyzing the last ${span} commit${span === 1 ? "" : "s"} (${commitCount} in history)`);
+  await runCompare({
+    repoDir,
+    outDir,
+    baseRef: baseSha,
+    headRef: headSha,
+    ...(options.repoName !== undefined ? { repoName: options.repoName } : {}),
+    io
+  });
+  io.out(
+    [
+      "",
+      "Next steps (the story loop):",
+      `  1. Read ${join(outDir, "narration-request.json")} — it lists the only entity/`,
+      "     change-unit ids you may reference, the evidenceFiles inventory diagram",
+      "     nodes must anchor to, and the diagram caps (diagramLimits).",
+      `  2. Write ${join(outDir, "narration-response.json")} with the project summary,`,
+      "     chapters, architectureDiagram, and a story per change unit.",
+      "  3. Run `gitiviz apply-narration` to validate, merge, and re-render the book."
+    ].join("\n")
+  );
+}
+
 export interface CommitOptions {
   repoDir: string;
   outDir: string;

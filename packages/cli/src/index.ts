@@ -1,6 +1,7 @@
 /**
  * gitiviz CLI — zero-dependency arg parsing + command dispatch.
  *
+ *   gitiviz init [--commits N]    [--repo DIR] [--out DIR] [--name NAME]
  *   gitiviz compare <base> <head> [--repo DIR] [--out DIR] [--name NAME]
  *   gitiviz branch [base]         [--repo DIR] [--out DIR] [--name NAME]
  *   gitiviz commit <sha>          [--repo DIR] [--out DIR] [--name NAME]
@@ -22,6 +23,7 @@ import {
   runBranch,
   runCommit,
   runCompare,
+  runInit,
   runValidate
 } from "./commands/compare.js";
 
@@ -31,25 +33,32 @@ export interface CliIo {
 }
 
 const USAGE = `Usage:
+  gitiviz init [--commits N]    [--repo DIR] [--out DIR] [--name NAME]
   gitiviz compare <base> <head> [--repo DIR] [--out DIR] [--name NAME]
   gitiviz branch [base]         [--repo DIR] [--out DIR] [--name NAME]
   gitiviz commit <sha>          [--repo DIR] [--out DIR] [--name NAME]
   gitiviz validate                          [--out DIR]
   gitiviz apply-narration                   [--out DIR] [--name NAME]
 
+  --commits N  init only: how many trailing commits to analyze (default: 20,
+               clamped to the available history)
   --repo DIR   git repository to analyze (default: current directory)
   --out DIR    output directory (default: <repo>/.gitiviz)
   --name NAME  repository display name (default: GITIVIZ_REPO_NAME env,
                else the origin remote's repo name, else the directory name)`;
+
+/** Default number of trailing commits `gitiviz init` analyzes. */
+const DEFAULT_INIT_COMMITS = 20;
 
 interface ParsedArgs {
   positionals: string[];
   repo?: string;
   out?: string;
   name?: string;
+  commits?: number;
 }
 
-/** Hand-rolled parser: three --flags with values, everything else positional. */
+/** Hand-rolled parser: four --flags with values, everything else positional. */
 export function parseArgs(argv: string[]): ParsedArgs {
   const parsed: ParsedArgs = { positionals: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -64,6 +73,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (token === "--repo") parsed.repo = value;
       else if (token === "--out") parsed.out = value;
       else parsed.name = value;
+    } else if (token === "--commits") {
+      const value = argv[++i];
+      if (value === undefined || !/^\d+$/.test(value) || Number(value) < 1) {
+        throw new Error("--commits needs a positive whole number (e.g. --commits 20)");
+      }
+      parsed.commits = Number(value);
     } else if (token.startsWith("--")) {
       throw new Error(`unknown option "${token}"`);
     } else {
@@ -121,8 +136,24 @@ export async function runCli(
       .find((v) => v !== "") ?? undefined;
   const named = explicitName !== undefined ? { repoName: explicitName } : {};
 
+  if (parsed.commits !== undefined && command !== "init") {
+    io.err('gitiviz: --commits is only valid for "init"');
+    io.err(USAGE);
+    return 1;
+  }
+
   try {
     switch (command) {
+      case "init":
+        expectArgs("init", rest, 0, 0);
+        await runInit({
+          repoDir,
+          outDir,
+          commits: parsed.commits ?? DEFAULT_INIT_COMMITS,
+          ...named,
+          io
+        });
+        return 0;
       case "compare":
         expectArgs("compare", rest, 2, 2);
         await runCompare({

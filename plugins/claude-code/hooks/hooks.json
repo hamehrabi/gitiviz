@@ -1,0 +1,17 @@
+{
+  "description": "Auto-story loop: after a `git commit` in a repository that already has a .gitiviz/ change book, refresh the deterministic facts for HEAD and hand Claude the context to write the new commit's story.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/plugins/claude-code/hooks/on-commit",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

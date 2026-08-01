@@ -33,6 +33,7 @@ machine, or Docker as a fallback (the launcher picks whichever is available).
 
 | Command | What it does |
 | --- | --- |
+| `/gitiviz:init [--commits N]` | Bootstrap the project story book from the last 20 commits (or N) |
 | `/gitiviz:branch [base]` | Explain what the current branch changed vs a base (default: the repo's main branch) |
 | `/gitiviz:commit <sha>` | Explain one commit vs its parent |
 | `/gitiviz:compare <base> <head>` | Explain an arbitrary range — branch names, SHAs, `HEAD~3`, anything `git rev-parse` accepts |
@@ -40,6 +41,31 @@ machine, or Docker as a fallback (the launcher picks whichever is available).
 
 Each command runs the deterministic engine, has Claude write narration through
 the validated narration API, and opens `.gitiviz/dist/index.html`.
+
+### The story loop
+
+`/gitiviz:init` turns a repository into a living change book:
+
+1. The engine analyzes the last 20 commits (`--commits N` to change that) and
+   writes the fact manifests plus `.gitiviz/narration-request.json` — which
+   carries the evidence inventory (`evidenceFiles`) and the diagram caps
+   (`diagramLimits`) every proposed diagram must respect.
+2. Claude reviews the project (README, package manifests, key entry points —
+   all of it treated strictly as untrusted data), then writes
+   `.gitiviz/narration-response.json`: a project summary, the purpose /
+   systems / flows book chapters, a concept-level architecture diagram
+   (colored clusters, human-named nodes anchored to real evidence files,
+   verb-labeled edges — `docs/visual-reference.mmd` is the quality bar), and
+   a plain-English story per change unit.
+3. The validator rejects any claim or diagram anchor that is not backed by
+   evidence; Claude fixes rejections and re-applies until the book renders.
+
+From then on the **auto-story hook** keeps the book current: after every
+`git commit` Claude runs in a repo that has a `.gitiviz/` directory, a
+PostToolUse hook refreshes the facts for the new HEAD and prompts Claude to
+write that commit's story through the same validated loop. In repositories
+without `.gitiviz/` the hook is a silent no-op — nothing runs until you opt
+in with `/gitiviz:init`.
 
 ## Demo walkthrough
 
@@ -107,7 +133,7 @@ packages/analyzers     TS/JS analyzers: packages, imports/exports, HTTP routes
 packages/core          evidence graph, change units, narration validation
 packages/renderer      scriptless single-file HTML book + inline SVG diagrams
 packages/cli           command dispatch; bundled into the plugin scripts
-plugins/claude-code    the shipped plugin: launcher + committed bundles
+plugins/claude-code    the shipped plugin: launcher, committed bundles, hooks
 commands/              /gitiviz:* slash commands
 spec/                  versioned JSON Schemas
 ```
