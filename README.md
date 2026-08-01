@@ -1,33 +1,144 @@
 # Gitiviz
 
-Turn any Git branch, commit, or range into a plain-language, evidence-backed,
-self-contained HTML change book.
+**Understand what changed in your code — without reading any code.**
 
-AI coding agents produce changed lines faster than humans can review them.
-Gitiviz is the comprehension layer: a deterministic facts engine reads your
-Git history, your coding agent narrates the facts in plain language, and a
-validator rejects any claim that is not anchored to real evidence. The result
-is one offline HTML file a PM can read top-to-bottom — with the developer
-evidence collapsed underneath every statement.
+Gitiviz reads your project's history and writes you a small website that
+explains it in plain English: what each change did, why it matters, and a
+simple picture of the parts involved. Non-technical people can read it. It
+works offline. It's one file you can email to anyone.
 
-- Deterministic facts are labelled **✓ derived**; agent narration is labelled
-  **◇ AI interpretation**. The provenance is structural — it cannot be faked
-  by the narrator.
+It's built for the age of AI coding assistants: they write changes faster
+than anyone can review them, so Gitiviz turns every change into a short,
+honest story.
+
+**Honest by design.** Facts pulled straight from your project are marked
+**✓**. Sentences written by the AI are marked **◇**. The AI is never allowed
+to claim something the code doesn't actually show.
+
+---
+
+## Get started in 2 minutes
+
+### Step 1 — Check you have what's needed
+
+You need [Claude Code](https://claude.com/claude-code), and on your computer:
+
+- **Git** (you already have it if you use GitHub), and
+- **either** Node.js 20+ **or** Docker — whichever you have. You don't need
+  both, and you don't need to configure anything.
+
+Nothing gets downloaded or installed into your project. Gitiviz ships ready to
+run.
+
+### Step 2 — Install the plugin
+
+Open Claude Code and type these two lines, one at a time:
+
+```
+/plugin marketplace add hamehrabi/gitiviz
+```
+
+```
+/plugin install gitiviz@gitiviz
+```
+
+The first line tells Claude Code where to find Gitiviz. The second installs it.
+(The name appears twice because it's `plugin-name@catalog-name` — both are
+called "gitiviz".)
+
+That's it — you install once, and it works in **all** your projects from then
+on. If the commands don't show up right away, restart Claude Code.
+
+### Step 3 — Use it on any project
+
+Open Claude Code inside any project folder and type:
+
+```
+/gitiviz:init
+```
+
+Claude will look through your recent history, understand what your project
+does, write the explanations, and build the book. It takes a few seconds.
+
+When it finishes, open the file it made:
+
+```
+.gitiviz/dist/index.html
+```
+
+Double-click it, or ask Claude: `/gitiviz:open`
+
+### Step 4 — Read it
+
+- **Home** — every change as a card. Click any card to read its story.
+- **Overview** — what this project is, in a paragraph.
+- **Architecture** — a map of the pieces and how they connect.
+- **How it works** — how to install and use the project.
+- **Issues** — tickets you've raised from the book.
+
+On a change's page you'll find: what it does in plain words, a *before* and
+*after*, a simple diagram, and — folded away at the bottom for developers —
+the exact files that changed, linked to GitHub.
+
+### Step 5 — It keeps itself up to date
+
+After that first `/gitiviz:init`, you don't have to do anything. Every time
+Claude Code makes a commit in that project, Gitiviz automatically writes the
+story for it and adds it to the book.
+
+(In projects where you never ran `/gitiviz:init`, nothing happens at all.)
+
+---
+
+## Everyday commands
+
+Type these in Claude Code, inside your project:
+
+| Type this | And you get |
+| --- | --- |
+| `/gitiviz:init` | The full book for your project — **start here** |
+| `/gitiviz:open` | Opens the book in your browser |
+| `/gitiviz:branch` | Explains what your current branch changed |
+| `/gitiviz:commit <id>` | Explains one specific change |
+| `/gitiviz:compare main my-branch` | Explains the difference between any two points |
+| `/gitiviz:discuss <id>` | Ask Claude questions about a change — it answers from the real code |
+| `/gitiviz:ticket <id> "Title"` | Turns a change into a GitHub issue, which then appears in the Issues tab |
+
+`<id>` is the short code shown on each change's card (like `a4e462c`).
+
+## Good to know
+
+**Add `.gitiviz/` to your project's `.gitignore`.** The book is generated
+output — it can be rebuilt any time, so there's no need to store it in Git.
+
+**Nothing leaves your computer** unless you ask for a ticket. The book is
+built from your local history, contains no code that runs, and works with
+your internet off.
+
+**Sharing it:** the book is a single file. Email it, attach it to a ticket,
+or drop it in Slack — it opens in any browser, on any machine.
+
+---
+
+## For engineers
+
+The rest of this README covers the internals: the fact/narration split, the
+validation guarantees, the security posture, and how to develop on Gitiviz
+itself.
+
+Gitiviz is a deterministic facts engine plus a validated narration loop. The
+engine reads Git and the source tree and emits schema-validated fact
+manifests; your coding agent narrates those facts; a validator rejects any
+claim or diagram anchor that is not backed by real evidence. Provenance is
+structural — `derived` cannot be claimed by a narrator.
+
 - The output is a single scriptless HTML file (strict CSP, no JavaScript, no
   network). Open it from disk, attach it to a ticket, email it.
 - No PR, no remote, no backend required. Everything runs locally against
   `.git`.
-
-## Install (Claude Code plugin)
-
-```
-/plugin marketplace add hamehrabi/gitiviz
-/plugin install gitiviz@gitiviz
-```
-
-The plugin's analysis scripts are committed, dependency-free Node bundles —
-installing the plugin never runs `npm install`. They need Node.js 20+ on your
-machine, or Docker as a fallback (the launcher picks whichever is available).
+- The plugin's analysis scripts are committed, dependency-free Node bundles —
+  installing the plugin never runs `npm install`. They need Node.js 20+, or
+  Docker as a fallback (the launcher picks whichever is available).
 
 ### Commands
 
