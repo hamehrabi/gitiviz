@@ -10,6 +10,14 @@ export {
 } from "./changeUnits.js";
 export { buildBookManifest } from "./book.js";
 export {
+  MAX_STORY_NODES,
+  buildOverviewStory,
+  buildUnitStory,
+  type StoryEdge,
+  type StoryNode,
+  type StoryProjection
+} from "./storyProjection.js";
+export {
   applyNarration,
   applyTemplateNarration,
   buildNarrationRequest,
