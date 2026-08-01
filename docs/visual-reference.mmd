@@ -1,0 +1,71 @@
+%% CANONICAL VISUAL REFERENCE for Gitiviz diagrams (user-approved 2026-08-01).
+%% This is the exact target aesthetic and abstraction level for the
+%% Architecture view: Mermaid flowchart TD, colored subgraph clusters,
+%% concept-level nodes (human name / role / [file]), verb-labeled edges,
+%% click links to the repository host. Produced by GitDiagram for this repo
+%% and adopted by the user as the quality bar. Commit-story diagrams use the
+%% same visual language but stay small (max ~7 nodes).
+
+flowchart TD
+
+subgraph group_entry["Entry & Runtime"]
+  node_claude_commands["Claude slash commands<br/>command definitions<br/>[branch.md]"]
+  node_plugin_launcher["Plugin launcher<br/>shell runtime<br/>[run.sh]"]
+  node_plugin_analyzer["Plugin analysis runner<br/>Node runtime<br/>[analyze.mjs]"]
+  node_cli["TypeScript CLI<br/>command dispatcher<br/>[main.ts]"]
+end
+
+subgraph group_analysis["Evidence Pipeline"]
+  node_git_boundary["Git facts boundary<br/>controlled Git execution<br/>[exec.ts]"]
+  node_diff_resolution["Refs and diffs<br/>Git inputs<br/>[diff.ts]"]
+  node_semantic_analyzers["Semantic analyzers<br/>JS/TS extraction"]
+  node_evidence_graph["Evidence graph<br/>core facts model<br/>[graph.ts]"]
+  node_change_units["Semantic change units<br/>chapter model<br/>[changeUnits.ts]"]
+  node_narration_request["Facts-only narration request<br/>AI handoff payload<br/>[narration.ts]"]
+  node_narration_gate["Narration validation gate<br/>claim validator<br/>[apply-narration.ts]"]
+end
+
+subgraph group_output["Interchange & Report"]
+  node_schema_contract["Manifest schema contract<br/>types and validators<br/>[validate.ts]"]
+  node_manifest_files[".gitiviz manifests<br/>file handoff"]
+  node_renderer["Scriptless HTML renderer<br/>report generator<br/>[render.ts]"]
+  node_html_book["Offline change book<br/>single-file HTML"]
+end
+
+subgraph group_delivery["Build & Distribution"]
+  node_bundle_build["Plugin bundler<br/>Node bundle build<br/>[bundle.mjs]"]
+  node_plugin_manifest["Claude plugin manifest<br/>plugin descriptor<br/>[plugin.json]"]
+  node_ci_integrity["CI artifact integrity<br/>build verification<br/>[ci.yml]"]
+end
+
+node_claude_commands -->|"invoke"| node_plugin_launcher
+node_plugin_launcher -->|"launches"| node_plugin_analyzer
+node_plugin_analyzer -->|"runs"| node_cli
+node_cli -->|"requests facts"| node_git_boundary
+node_git_boundary -->|"resolves refs and diffs"| node_diff_resolution
+node_diff_resolution -->|"changed files"| node_semantic_analyzers
+node_diff_resolution -->|"diff evidence"| node_evidence_graph
+node_semantic_analyzers -->|"semantic facts"| node_evidence_graph
+node_evidence_graph -->|"groups evidence"| node_change_units
+node_change_units -->|"facts-only context"| node_narration_request
+node_evidence_graph -->|"validated facts"| node_manifest_files
+node_change_units -->|"book chapters"| node_manifest_files
+node_schema_contract -->|"validates"| node_manifest_files
+node_narration_request -->|"file handoff"| node_manifest_files
+node_manifest_files -.->|"narration response"| node_narration_gate
+node_narration_gate -->|"validated book"| node_manifest_files
+node_manifest_files -->|"validated book data"| node_renderer
+node_renderer -->|"renders"| node_html_book
+node_bundle_build -->|"bundles for shipment"| node_plugin_launcher
+node_plugin_manifest -->|"declares runtime"| node_plugin_launcher
+node_ci_integrity -->|"rebuilds and checks"| node_bundle_build
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+class node_claude_commands,node_plugin_launcher,node_plugin_analyzer,node_cli toneBlue
+class node_git_boundary,node_diff_resolution,node_semantic_analyzers,node_evidence_graph,node_change_units,node_narration_request,node_narration_gate toneAmber
+class node_schema_contract,node_manifest_files,node_renderer,node_html_book toneMint
+class node_bundle_build,node_plugin_manifest,node_ci_integrity toneRose
