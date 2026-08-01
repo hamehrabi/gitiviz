@@ -84,6 +84,13 @@ export const commitPageCss = `
 .cp-ev-list{list-style:none;margin:0.5rem 0 0.75rem;padding:0}
 .cp-ev-list li{margin:0.375rem 0;overflow-wrap:anywhere}
 .cp-ev-list code{font-family:${MONO};font-size:0.8125rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}
+.cp-ev-list a{color:#1d4ed8;text-decoration:none;overflow-wrap:anywhere}
+.cp-ev-list a code{color:#1d4ed8}
+.cp-ev-list a:hover code{border-color:#1d4ed8}
+.cp-ev-list a:focus-visible{outline:2px solid #1d4ed8;outline-offset:2px}
+.cp-ev-heading{margin:1rem 0 0.25rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280}
+.cp-ev-more{margin:0.375rem 0 0.5rem;border:none;border-radius:0;padding:0}
+.cp-ev-more>summary{cursor:pointer;color:#6b7280;font-size:0.8125rem}
 .cp-ev-muted{color:#6b7280}
 .cp-ev-empty{margin:0.5rem 0;color:#6b7280;font-size:0.875rem}
 @media (max-width:479px){.cp-row{flex-direction:column;gap:0.125rem}.cp-row dt{width:auto;padding-top:0}}
@@ -155,8 +162,25 @@ function unchangedFold(count: number): string {
   );
 }
 
-function anchorLine(anchor: EvidenceAnchor): string {
-  let text = escHtml(anchor.path);
+/** Sources longer than this fold the tail into a nested "+N more files". */
+const SOURCES_VISIBLE_LIMIT = 10;
+
+/**
+ * One evidence path. The path becomes a link ONLY when the integrator's
+ * origin-validated `sourceLinks` map has an entry for it (links.ts policy);
+ * otherwise it renders as plain escaped text. The map value is safe as a
+ * URL, not as markup — it still passes escAttr here.
+ */
+function anchorLine(
+  anchor: EvidenceAnchor,
+  sourceLinks: CommitPageDiagramExtras["sourceLinks"]
+): string {
+  const code = `<code>${escHtml(anchor.path)}</code>`;
+  const url = sourceLinks?.get(anchor.path);
+  let text =
+    url === undefined
+      ? code
+      : `<a href="${escAttr(url)}" target="_blank" rel="noopener">${code}</a>`;
   if (anchor.range) {
     text +=
       ` <span class="cp-ev-muted">lines ` +
@@ -165,12 +189,41 @@ function anchorLine(anchor: EvidenceAnchor): string {
   if (anchor.symbol) {
     text += ` <span class="cp-ev-muted">· ${escHtml(anchor.symbol)}</span>`;
   }
-  return `<li>${DERIVED_MARK} <code>${text}</code></li>`;
+  return `<li>${DERIVED_MARK} ${text}</li>`;
+}
+
+/**
+ * The "Sources" run of the evidence fold: mini-heading, the first
+ * SOURCES_VISIBLE_LIMIT paths, and a nested closed "+N more files" fold
+ * for the rest. Empty string when the unit recorded no evidence paths.
+ */
+function sourcesSection(
+  unit: CommitPageModel,
+  extras: CommitPageDiagramExtras
+): string {
+  const lines = (unit.unit.evidence ?? []).map((anchor) =>
+    anchorLine(anchor, extras.sourceLinks)
+  );
+  if (lines.length === 0) return "";
+  const visible = lines.slice(0, SOURCES_VISIBLE_LIMIT);
+  const rest = lines.slice(SOURCES_VISIBLE_LIMIT);
+  const more =
+    rest.length === 0
+      ? ""
+      : `<details class="cp-ev-more">` +
+        `<summary>+${rest.length} more file${rest.length === 1 ? "" : "s"}</summary>` +
+        `<ul class="cp-ev-list">${rest.join("")}</ul></details>`;
+  return (
+    `<p class="cp-ev-heading">Sources</p>` +
+    `<ul class="cp-ev-list">${visible.join("")}</ul>` +
+    more
+  );
 }
 
 /**
  * Technical evidence, collapsed at the bottom: raw subject, the full
- * unit-scoped entity graph (the ONLY place it may appear), commits, anchors.
+ * unit-scoped entity graph (the ONLY place it may appear), commits, and
+ * the Sources list (origin-validated links) at the fold's end.
  */
 function evidenceFold(unit: CommitPageModel, extras: CommitPageDiagramExtras): string {
   const commits = (unit.unit.commits ?? []).map(
@@ -178,12 +231,13 @@ function evidenceFold(unit: CommitPageModel, extras: CommitPageDiagramExtras): s
       `<li>${DERIVED_MARK} Commit ` +
       `<code title="${escAttr(sha)}">${escHtml(sha.slice(0, 7))}</code></li>`
   );
-  const anchors = (unit.unit.evidence ?? []).map(anchorLine);
-  const lines = [...commits, ...anchors];
-  const list =
-    lines.length === 0
+  const commitList =
+    commits.length === 0 ? "" : `<ul class="cp-ev-list">${commits.join("")}</ul>`;
+  const sources = sourcesSection(unit, extras);
+  const empty =
+    commitList === "" && sources === ""
       ? `<p class="cp-ev-empty">No recorded evidence for this change.</p>`
-      : `<ul class="cp-ev-list">${lines.join("")}</ul>`;
+      : "";
   const graph =
     extras.evidenceSvg == null
       ? ""
@@ -194,7 +248,9 @@ function evidenceFold(unit: CommitPageModel, extras: CommitPageDiagramExtras): s
     `<p class="cp-ev-title">${DERIVED_MARK} ` +
     `<code>${escHtml(unit.unit.technicalTitle)}</code></p>` +
     graph +
-    list +
+    commitList +
+    sources +
+    empty +
     `</details>`
   );
 }
@@ -209,6 +265,11 @@ export interface CommitPageDiagramExtras {
   fallbackNote?: string | null;
   /** Full unit graph SVG — rendered ONLY inside the Technical evidence fold. */
   evidenceSvg?: string | null;
+  /**
+   * Origin-validated web URL per evidence path (links.ts `repoFileUrl`).
+   * Paths without an entry render as plain escaped text, never as links.
+   */
+  sourceLinks?: ReadonlyMap<string, string>;
 }
 
 /**

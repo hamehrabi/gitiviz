@@ -30,7 +30,7 @@
 import type { ConceptDiagram, DiagramTone } from "@gitiviz/schema";
 import type { StoryNode, StoryProjection } from "@gitiviz/core";
 import { MAX_STORY_NODES } from "@gitiviz/core";
-import { safeUrl } from "./escape.js";
+import { repoFileUrl } from "./links.js";
 
 // ---------------------------------------------------------------------------
 // Canonical palette (docs/visual-reference.mmd + the schema's sixth tone)
@@ -109,29 +109,12 @@ export interface MermaidCompileOptions {
 
 /**
  * Compose and validate the click URL for one file, or null when anything
- * about it is unsafe. Each path segment percent-encodes, so no file name
- * can close the directive's quotes or change the URL's origin.
+ * about it is unsafe. Delegates to the shared repository-link policy in
+ * links.ts (evidence-index membership → safeUrl → segment-encode →
+ * recheck → same-origin), which the Sources list reuses.
  */
 function clickUrl(file: string, options: MermaidCompileOptions): string | null {
-  const { linkBase, allowedOrigins = [], existingFiles } = options;
-  if (linkBase === undefined || existingFiles === undefined) return null;
-  if (!existingFiles.has(file)) return null;
-  const safeBase = safeUrl(linkBase, allowedOrigins);
-  if (safeBase === null) return null;
-  const encoded = file
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  const url = safeUrl(
-    `${safeBase.replace(/\/+$/, "")}/${encoded}`,
-    allowedOrigins
-  );
-  if (url === null) return null;
-  // The composed URL must stay on the configured repository origin.
-  if (new URL(url).origin !== new URL(safeBase).origin) return null;
-  // Belt and braces: nothing that could escape the quoted directive.
-  if (/["\s<>\\]/.test(url)) return null;
-  return url;
+  return repoFileUrl(file, options);
 }
 
 // ---------------------------------------------------------------------------

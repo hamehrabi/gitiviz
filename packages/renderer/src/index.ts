@@ -1,5 +1,10 @@
 export { escAttr, escHtml, safeUrl } from "./escape.js";
 export {
+  repoFileUrl,
+  type RenderLinkOptions,
+  type RepoFileUrlOptions
+} from "./links.js";
+export {
   changeDiagram,
   compileDiagram,
   contextDiagram,

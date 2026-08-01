@@ -280,6 +280,99 @@ describe("renderCommitPage folds", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Sources (origin-validated evidence links at the fold's end)
+// ---------------------------------------------------------------------------
+
+describe("renderCommitPage sources", () => {
+  const anchorsOf = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      path: `src/file-${String(i).padStart(2, "0")}.ts`
+    }));
+
+  it("lists evidence paths under a Sources mini-heading at the fold's end", () => {
+    const { root } = parse(renderCommitPage(demoModel(), null));
+    const evidence = root.querySelector(".cp-evidence")!;
+    const heading = evidence.querySelector(".cp-ev-heading");
+    expect(heading).not.toBeNull();
+    expect(heading!.textContent).toBe("Sources");
+    // The Sources run closes the fold: nothing but its list(s) follows.
+    expect(evidence.lastElementChild!.classList.contains("cp-ev-list")).toBe(true);
+    expect(evidence.lastElementChild!.textContent).toContain("src/routes/orders.ts");
+  });
+
+  it("links a path only when the sourceLinks map carries a validated URL", () => {
+    const url = "https://github.com/acme/demo/blob/abc123/src/routes/orders.ts";
+    const model = demoModel({
+      unit: demoUnit({
+        evidence: [{ path: "src/routes/orders.ts" }, { path: "src/other.ts" }]
+      })
+    });
+    const { root } = parse(
+      renderCommitPage(model, null, {
+        sourceLinks: new Map([["src/routes/orders.ts", url]])
+      })
+    );
+    const links = Array.from(root.querySelectorAll(".cp-evidence a"));
+    expect(links.length).toBe(1);
+    expect(links[0]!.getAttribute("href")).toBe(url);
+    expect(links[0]!.getAttribute("target")).toBe("_blank");
+    expect(links[0]!.getAttribute("rel")).toBe("noopener");
+    expect(links[0]!.querySelector("code")!.textContent).toBe("src/routes/orders.ts");
+    // The unmapped path stays plain escaped text.
+    expect(root.textContent).toContain("src/other.ts");
+  });
+
+  it("renders no links at all without a sourceLinks map", () => {
+    const { root } = parse(renderCommitPage(demoModel(), null));
+    expect(root.querySelectorAll(".cp-evidence a").length).toBe(0);
+  });
+
+  it("shows at most 10 paths and folds the rest into a closed '+N more files'", () => {
+    const model = demoModel({ unit: demoUnit({ evidence: anchorsOf(13) }) });
+    const { root } = parse(renderCommitPage(model, null));
+    const evidence = root.querySelector(".cp-evidence")!;
+    const lists = evidence.querySelectorAll("ul.cp-ev-list");
+    // commits list + visible sources + nested-fold list
+    const more = evidence.querySelector("details.cp-ev-more");
+    expect(more).not.toBeNull();
+    expect(more!.hasAttribute("open")).toBe(false);
+    expect(more!.querySelector("summary")!.textContent).toBe("+3 more files");
+    expect(more!.querySelectorAll("li").length).toBe(3);
+    const visible = Array.from(lists).find(
+      (list) => list.textContent.includes("src/file-00.ts")
+    )!;
+    expect(visible.querySelectorAll("li").length).toBe(10);
+    expect(more!.textContent).toContain("src/file-12.ts");
+  });
+
+  it("singularizes the nested fold for one extra file", () => {
+    const model = demoModel({ unit: demoUnit({ evidence: anchorsOf(11) }) });
+    const { root } = parse(renderCommitPage(model, null));
+    expect(
+      root.querySelector("details.cp-ev-more summary")!.textContent
+    ).toBe("+1 more file");
+  });
+
+  it("emits no nested fold at 10 paths or fewer", () => {
+    const model = demoModel({ unit: demoUnit({ evidence: anchorsOf(10) }) });
+    const { root } = parse(renderCommitPage(model, null));
+    expect(root.querySelector("details.cp-ev-more")).toBeNull();
+    expect(root.querySelectorAll("details").length).toBe(2);
+  });
+
+  it("escapes link URLs at the point of output", () => {
+    const url = "https://github.com/acme/demo/blob/abc?a=1&b=2";
+    const model = demoModel({
+      unit: demoUnit({ evidence: [{ path: "src/routes/orders.ts" }] })
+    });
+    const html = renderCommitPage(model, null, {
+      sourceLinks: new Map([["src/routes/orders.ts", url]])
+    });
+    expect(html).toContain('href="https://github.com/acme/demo/blob/abc?a=1&amp;b=2"');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Back link
 // ---------------------------------------------------------------------------
 

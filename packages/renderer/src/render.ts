@@ -58,6 +58,7 @@ import {
 import { renderSidebar, sidebarCss } from "./sidebar.js";
 import { cardsCss, renderCardsGrid, renderFilterChips } from "./cards.js";
 import { commitPageCss, renderCommitPage } from "./commitPage.js";
+import { repoFileUrl, type RenderLinkOptions } from "./links.js";
 import {
   toCardModel,
   toCommitPageModel,
@@ -125,6 +126,13 @@ export interface RenderOptions {
   repoName?: string;
   /** Mermaid concept diagrams (visual bar: docs/visual-reference.mmd). */
   mermaid?: MermaidRenderOptions;
+  /**
+   * Web-link policy (interface contract with the CLI): `linkBase` composes
+   * evidence "Sources" links on commit pages via links.ts; `origin` is the
+   * repository's web origin that issue-card links must match exactly.
+   * Absent → paths render as plain text and issue cards stay linkless.
+   */
+  links?: RenderLinkOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +272,34 @@ function compileOptions(
       : {}),
     existingFiles: evidenceFiles(change)
   };
+}
+
+/**
+ * Origin-validated web URL per evidence path of one unit (links.ts
+ * policy: evidence-index membership → safeUrl → segment-encode →
+ * same-origin). Paths that fail any step simply get no map entry — the
+ * commit-page module then renders them as plain escaped text.
+ */
+function unitSourceLinks(
+  unit: ChangeUnit,
+  change: ChangeManifest,
+  links: RenderLinkOptions | undefined
+): ReadonlyMap<string, string> {
+  const map = new Map<string, string>();
+  if (links?.linkBase === undefined) return map;
+  const policy = {
+    linkBase: links.linkBase,
+    ...(links.allowedOrigins !== undefined
+      ? { allowedOrigins: links.allowedOrigins }
+      : {}),
+    existingFiles: evidenceFiles(change)
+  };
+  for (const anchor of unit.evidence ?? []) {
+    if (map.has(anchor.path)) continue;
+    const url = repoFileUrl(anchor.path, policy);
+    if (url !== null) map.set(anchor.path, url);
+  }
+  return map;
 }
 
 /**
@@ -574,9 +610,11 @@ function commitPageSection(
             "change"
           );
   const heroSvg = mermaidSvg ?? fallbackSvg;
+  const sourceLinks = unitSourceLinks(unit, change, options.links);
   return renderCommitPage(toCommitPageModel(unit, index, change), heroSvg, {
     fallbackNote: fallbackSvg !== null ? MERMAID_FALLBACK_NOTE : null,
-    evidenceSvg
+    evidenceSvg,
+    ...(sourceLinks.size > 0 ? { sourceLinks } : {})
   });
 }
 

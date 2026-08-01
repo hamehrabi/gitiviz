@@ -972,6 +972,69 @@ describe("mermaid concept diagrams", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Sources links (RenderOptions.links → evidence fold anchors)
+// ---------------------------------------------------------------------------
+
+describe("sources links", () => {
+  const LINK_BASE = "https://github.com/acme/demo/blob/" + "b".repeat(40);
+
+  it("threads links.linkBase into origin-validated Sources anchors", () => {
+    const change = demoChange();
+    const doc = parse(
+      renderChangeBook(demoBook(change), change, {
+        links: { linkBase: LINK_BASE, origin: "https://github.com" }
+      })
+    );
+    const link = doc.querySelector('#u0 .cp-evidence a[target="_blank"]');
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute("href")).toBe(`${LINK_BASE}/src/routes/orders.ts`);
+    expect(link!.getAttribute("rel")).toBe("noopener");
+    expect(link!.querySelector("code")!.textContent).toBe("src/routes/orders.ts");
+  });
+
+  it("renders evidence paths as plain text without a linkBase", () => {
+    const doc = parse(renderDemo());
+    expect(doc.querySelectorAll(".cp-evidence a").length).toBe(0);
+    expect(doc.querySelector("#u0 .cp-evidence")!.textContent).toContain(
+      "src/routes/orders.ts"
+    );
+  });
+
+  it("composes no links from an unsafe linkBase", () => {
+    const change = demoChange();
+    const doc = parse(
+      renderChangeBook(demoBook(change), change, {
+        links: { linkBase: "javascript:alert(1)//" }
+      })
+    );
+    expect(doc.querySelectorAll(".cp-evidence a").length).toBe(0);
+  });
+
+  it("keeps hostile evidence paths inert — encoded URL, escaped text", () => {
+    const change = hostileChange();
+    change.changeUnits[0]!.evidence = [{ path: "<img src=x onerror=alert(1)>.ts" }];
+    const html = renderChangeBook(demoBook(change), change, {
+      links: { linkBase: LINK_BASE }
+    });
+    expect(html).not.toContain("<img src=x");
+    const doc = parse(html);
+    expect(doc.querySelectorAll("img").length).toBe(0);
+    const link = doc.querySelector("#u0 .cp-evidence a");
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute("href")).toContain("%3Cimg%20src%3Dx");
+    expect(new URL(link!.getAttribute("href")!).origin).toBe("https://github.com");
+  });
+
+  it("stays byte-deterministic with links configured", () => {
+    const render = () =>
+      renderChangeBook(demoBook(demoChange()), demoChange(), {
+        links: { linkBase: LINK_BASE, origin: "https://github.com" }
+      });
+    expect(render()).toBe(render());
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Hostile input
 // ---------------------------------------------------------------------------
 
