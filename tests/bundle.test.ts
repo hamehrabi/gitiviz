@@ -19,6 +19,14 @@ const scriptsDir = join(repoRoot, "plugins", "claude-code", "scripts");
 const ARTIFACTS = ["analyze.mjs", "apply-narration.mjs"] as const;
 
 /**
+ * The two optional diagram engines the bundles may probe for at runtime via
+ * fail-soft dynamic imports (they degrade to mermaid-cli-via-Docker, then
+ * the built-in engine — docs/decisions/0002-mermaid-render-chain.md).
+ * They must never appear as static imports or require shims.
+ */
+const OPTIONAL_DYNAMIC_IMPORTS = new Set(["jsdom", "mermaid"]);
+
+/**
  * Every executable import/require specifier in a bundle. Mirrors the check in
  * build/bundle.mjs: real ESM import statements sit on their own line in
  * esbuild's unminified output (ajv's embedded standalone-codegen *strings*
@@ -30,8 +38,11 @@ function externalSpecifiers(source: string): string[] {
   const importRe = /^import\b[^\n]*?["']([^"']+)["'];?\s*$/gm;
   const shimRequireRe = /__require\(\s*["']([^"']+)["']\s*\)/g;
   const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-  for (const re of [importRe, shimRequireRe, dynamicImportRe]) {
+  for (const re of [importRe, shimRequireRe]) {
     for (const match of source.matchAll(re)) specifiers.push(match[1]!);
+  }
+  for (const match of source.matchAll(dynamicImportRe)) {
+    if (!OPTIONAL_DYNAMIC_IMPORTS.has(match[1]!)) specifiers.push(match[1]!);
   }
   return specifiers.filter((s) => !s.startsWith("node:"));
 }
@@ -64,6 +75,14 @@ describe.each(ARTIFACTS)("plugins/claude-code/scripts/%s", (artifact) => {
 
   it("imports nothing but node: builtins (deps are bundled in)", () => {
     expect(externalSpecifiers(source)).toEqual([]);
+  });
+
+  it("keeps the optional diagram engines dynamic-import-only (fail-soft)", () => {
+    // Present as probes…
+    expect(source).toContain('import("jsdom")');
+    expect(source).toContain('import("mermaid")');
+    // …but never as hard static imports.
+    expect(source).not.toMatch(/^import\b[^\n]*?["'](?:jsdom|mermaid)["'];?\s*$/m);
   });
 
   it("embeds the spec JSON Schemas instead of reading them from disk", () => {

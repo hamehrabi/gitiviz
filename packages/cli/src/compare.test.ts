@@ -23,6 +23,9 @@ import {
   validateChangeManifest,
   type ChangeManifest
 } from "@gitiviz/schema";
+import type { BookManifest } from "@gitiviz/schema";
+import { CHAPTER_IDS } from "@gitiviz/schema";
+import { renderToDist, type DiagramPrerenderer } from "./commands/compare.js";
 import { runCli, type CliIo } from "./index.js";
 
 interface CapturedIo extends CliIo {
@@ -292,6 +295,194 @@ describe("repository display name resolution through the CLI", () => {
     expect(await runCli(compareArgs(out2), io2, {}), io2.errText()).toBe(0);
     expect(await repoNameIn(out2)).toBe(basename(demoRepo));
   }, 60_000);
+});
+
+describe("renderToDist mermaid wiring (stub prerenderer)", () => {
+  const HEAD_SHA = "b".repeat(40);
+
+  function fixtureChange(): ChangeManifest {
+    return {
+      specVersion: "0.1.0",
+      repository: { name: "demo-app" },
+      baseRevision: "a".repeat(40),
+      headRevision: HEAD_SHA,
+      entities: [
+        {
+          id: "ent-a",
+          kind: "module",
+          humanLabel: "Order service",
+          baseState: "unchanged",
+          headState: "changed",
+          provenance: "derived",
+          evidence: [{ path: "src/orderService.ts" }]
+        }
+      ],
+      relationships: [],
+      changeUnits: [
+        {
+          id: "unit-1",
+          technicalTitle: "feat: add checkout",
+          commits: ["c".repeat(40)],
+          entities: ["ent-a"],
+          provenance: "derived"
+        }
+      ],
+      analysisLimitations: [],
+      architectureDiagram: {
+        clusters: [{ id: "core", title: "Core", tone: "blue" }],
+        nodes: [
+          {
+            id: "svc",
+            cluster: "core",
+            humanLabel: "Order service",
+            role: "order logic",
+            file: "src/orderService.ts"
+          }
+        ],
+        edges: [],
+        provenance: "inferred",
+        confidence: 0.9
+      }
+    };
+  }
+
+  function fixtureBook(): BookManifest {
+    return {
+      specVersion: "0.1.0",
+      repository: { name: "demo-app" },
+      chapters: CHAPTER_IDS.map((id) => ({
+        id,
+        title: `Title for ${id}`,
+        status: id === "systems" ? ("generated" as const) : ("not-written" as const)
+      }))
+    };
+  }
+
+  interface StubCall {
+    sources: { id: string; text: string }[];
+    options: { outDir: string; allowedOrigins?: readonly string[] };
+  }
+
+  function stubPrerenderer(calls: StubCall[]): DiagramPrerenderer {
+    return async (sources, options) => {
+      calls.push({ sources: sources.map((s) => ({ ...s })), options });
+      return {
+        svgs: new Map(
+          sources.map((s) => [
+            s.id,
+            { text: s.text, svg: `<svg data-stub="${s.id}"></svg>` }
+          ])
+        ),
+        notes: ["mermaid: stub engine"]
+      };
+    };
+  }
+
+  it("passes linkBase + allowedOrigins into the compiled sources and embeds the SVGs", async () => {
+    const out = await newOutDir();
+    const io = captureIo();
+    const calls: StubCall[] = [];
+    await renderToDist({
+      outDir: out,
+      book: fixtureBook(),
+      change: fixtureChange(),
+      io,
+      repoOrigin: "https://github.com/acme/demo",
+      headSha: HEAD_SHA,
+      prerender: stubPrerenderer(calls)
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.options.outDir).toBe(out);
+    expect(calls[0]!.options.allowedOrigins).toEqual(["https://github.com"]);
+    const architecture = calls[0]!.sources.find((s) => s.id === "architecture");
+    expect(architecture).toBeDefined();
+    expect(architecture!.text).toContain(
+      `click n0 "https://github.com/acme/demo/blob/${HEAD_SHA}/src/orderService.ts" _blank`
+    );
+    const html = await readFile(join(out, "dist", "index.html"), "utf8");
+    expect(html).toContain('data-stub="architecture"');
+    expect(io.outText()).toContain("mermaid: stub engine");
+    // A prerendered slot never carries the fallback caption.
+    const archStart = html.indexOf('data-stub="architecture"');
+    expect(html.slice(archStart, archStart + 400)).not.toContain(
+      "built-in diagram engine"
+    );
+  });
+
+  it("compiles no click directives without a repo origin or with a worktree head", async () => {
+    for (const overrides of [
+      { repoOrigin: null, headSha: HEAD_SHA },
+      { repoOrigin: "https://github.com/acme/demo", headSha: "WORKTREE" }
+    ]) {
+      const out = await newOutDir();
+      const calls: StubCall[] = [];
+      await renderToDist({
+        outDir: out,
+        book: fixtureBook(),
+        change: fixtureChange(),
+        io: captureIo(),
+        prerender: stubPrerenderer(calls),
+        ...overrides
+      });
+      const texts = calls[0]!.sources.map((s) => s.text).join("\n");
+      expect(texts).not.toContain("click ");
+      expect(texts).not.toContain("https://github.com");
+    }
+  });
+});
+
+describe("click-through links end to end (real mermaid, narrated diagram)", () => {
+  it("renders origin-validated hrefs and real mermaid structure into the book", async () => {
+    const out = await newOutDir();
+    const env = { GITIVIZ_REPO_ORIGIN: "https://github.com/acme/demo-shop" };
+    expect(
+      await runCli(
+        ["compare", "main", DEMO_FEATURE_BRANCH, "--repo", demoRepo, "--out", out],
+        captureIo(),
+        env
+      )
+    ).toBe(0);
+    // Narrate an architecture diagram anchored to a real evidence file, the
+    // way the agent loop does.
+    const request = (await readJson(join(out, "narration-request.json"))) as {
+      evidenceFiles: string[];
+    };
+    const file = request.evidenceFiles[0]!;
+    await writeFile(
+      join(out, "narration-response.json"),
+      JSON.stringify({
+        architectureDiagram: {
+          clusters: [{ id: "core", title: "Core services", tone: "blue" }],
+          nodes: [
+            {
+              id: "svc",
+              cluster: "core",
+              humanLabel: "Checkout service",
+              role: "order handling",
+              file
+            }
+          ],
+          edges: []
+        }
+      }),
+      "utf8"
+    );
+    const io = captureIo();
+    expect(await runCli(["apply-narration", "--repo", demoRepo, "--out", out], io, env)).toBe(
+      0
+    );
+    const html = await readFile(join(out, "dist", "index.html"), "utf8");
+    const encoded = file.split("/").map(encodeURIComponent).join("/");
+    // Click-through href on the configured origin, pinned to the head sha.
+    expect(html).toContain(
+      `href="https://github.com/acme/demo-shop/blob/${featureSha}/${encoded}"`
+    );
+    // Real mermaid output markers: cluster group + tone class defs.
+    expect(html).toContain('class="cluster');
+    expect(html).toContain("toneBlue");
+    // Still scriptless.
+    expect(html).not.toContain("<script");
+  }, 120_000);
 });
 
 describe("thin wrappers", () => {

@@ -25,12 +25,14 @@ export {
   type MermaidCompileOptions
 } from "./mermaid.js";
 export {
+  MERMAID_RENDER_CONFIG,
   renderChangeBookWithMermaid,
   renderMermaidDiagram,
   sanitizeMermaidSvg,
   type MermaidRenderResult,
   type MermaidSvgOptions
 } from "./mermaidSvg.js";
+export { sanitizeMermaidSvgText } from "./svgSanitizeLite.js";
 export {
   collectMermaidSources,
   commitType,

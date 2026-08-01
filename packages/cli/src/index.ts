@@ -135,6 +135,13 @@ export async function runCli(
       .map((v) => v?.trim() ?? "")
       .find((v) => v !== "") ?? undefined;
   const named = explicitName !== undefined ? { repoName: explicitName } : {};
+  // Explicit web origin for diagram click links (GITIVIZ_REPO_ORIGIN env);
+  // commands otherwise derive it from the origin remote.
+  const explicitOrigin = env["GITIVIZ_REPO_ORIGIN"]?.trim();
+  const origined =
+    explicitOrigin !== undefined && explicitOrigin !== ""
+      ? { repoOrigin: explicitOrigin }
+      : {};
 
   if (parsed.commits !== undefined && command !== "init") {
     io.err('gitiviz: --commits is only valid for "init"');
@@ -151,6 +158,7 @@ export async function runCli(
           outDir,
           commits: parsed.commits ?? DEFAULT_INIT_COMMITS,
           ...named,
+          ...origined,
           io
         });
         return 0;
@@ -162,19 +170,26 @@ export async function runCli(
           baseRef: rest[0]!,
           headRef: rest[1]!,
           ...named,
+          ...origined,
           io
         });
         return 0;
       case "branch": {
         expectArgs("branch", rest, 0, 1);
-        const options: Parameters<typeof runBranch>[0] = { repoDir, outDir, ...named, io };
+        const options: Parameters<typeof runBranch>[0] = {
+          repoDir,
+          outDir,
+          ...named,
+          ...origined,
+          io
+        };
         if (rest[0] !== undefined) options.baseRef = rest[0];
         await runBranch(options);
         return 0;
       }
       case "commit":
         expectArgs("commit", rest, 1, 1);
-        await runCommit({ repoDir, outDir, ref: rest[0]!, ...named, io });
+        await runCommit({ repoDir, outDir, ref: rest[0]!, ...named, ...origined, io });
         return 0;
       case "validate":
         expectArgs("validate", rest, 0, 0);
@@ -182,7 +197,7 @@ export async function runCli(
         return 0;
       case "apply-narration":
         expectArgs("apply-narration", rest, 0, 0);
-        await runApplyNarration({ outDir, ...named, io });
+        await runApplyNarration({ outDir, repoDir, ...named, ...origined, io });
         return 0;
       case undefined:
         io.err("gitiviz: no command given");

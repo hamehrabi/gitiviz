@@ -6594,11 +6594,11 @@ var require_ajv = __commonJS({
 });
 
 // packages/cli/src/index.ts
-import { join as join2, resolve as resolve2 } from "node:path";
+import { join as join3, resolve as resolve2 } from "node:path";
 
 // packages/cli/src/commands/compare.ts
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "node:fs/promises";
+import { join as join2 } from "node:path";
 
 // packages/cli/src/repo-name.ts
 import { basename, resolve } from "node:path";
@@ -9591,6 +9591,17 @@ function unitMermaidSource(unit, change, mermaid) {
     buildUnitStory(unit, change.entities, change.relationships)
   );
 }
+function collectMermaidSources(book, change, mermaid) {
+  const sources = [];
+  const architecture = architectureMermaidSource(book, change, mermaid);
+  if (architecture !== null) sources.push({ id: "architecture", text: architecture });
+  const meaningful = change.changeUnits.filter((unit) => !unit.grouped);
+  meaningful.forEach((unit, index) => {
+    const text = unitMermaidSource(unit, change, mermaid);
+    if (text !== null) sources.push({ id: unitAnchorId(index), text });
+  });
+  return sources;
+}
 function prerenderedSvg(slotId, sourceText, mermaid) {
   if (sourceText === null) return null;
   const entry = mermaid?.svgs?.get(slotId);
@@ -9911,6 +9922,519 @@ function renderChangeBook(book, change, options = {}) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_CONTENT}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${stylesheet()}</style></head><body><a class="skip-link" href="#main">Skip to content</a><div class="layout">` + renderSidebar(TABS, "home", displayName) + `<main id="main">` + sections + `</main></div></body></html>`;
 }
 
+// packages/renderer/src/mermaidSvg.ts
+var CHAR_WIDTH = 8;
+var LINE_HEIGHT = 24;
+var GEO_SKIP_TAGS = /* @__PURE__ */ new Set(["style", "defs", "marker", "title", "desc"]);
+function textEstimate(el) {
+  const rows = Array.from(
+    el.querySelectorAll?.(".text-outer-tspan") ?? []
+  );
+  if (rows.length > 0) {
+    let width2 = 0;
+    for (const row of rows) {
+      width2 = Math.max(width2, String(row.textContent ?? "").length * CHAR_WIDTH);
+    }
+    return { width: width2, height: rows.length * LINE_HEIGHT };
+  }
+  const lines = String(el.textContent ?? "").split("\n");
+  const width = Math.max(...lines.map((l) => l.length), 1) * CHAR_WIDTH;
+  return { width, height: lines.length * LINE_HEIGHT };
+}
+function parseTranslate(el) {
+  const transform = el.getAttribute?.("transform") ?? "";
+  const match = /translate\(\s*(-?[\d.]+)[ ,]\s*(-?[\d.]+)\s*\)/.exec(transform);
+  return match ? { dx: Number(match[1]), dy: Number(match[2]) } : { dx: 0, dy: 0 };
+}
+function geometryBox(el) {
+  const tag = String(el.tagName ?? "").toLowerCase();
+  if (GEO_SKIP_TAGS.has(tag)) return null;
+  if (tag === "rect") {
+    const x = Number(el.getAttribute("x") ?? 0);
+    const y = Number(el.getAttribute("y") ?? 0);
+    const w = Number(el.getAttribute("width") ?? 0);
+    const h = Number(el.getAttribute("height") ?? 0);
+    if (!Number.isFinite(x + y + w + h) || w === 0 && h === 0) return null;
+    return { minX: x, minY: y, maxX: x + w, maxY: y + h };
+  }
+  if (tag === "path") {
+    const d = el.getAttribute("d") ?? "";
+    let box = null;
+    for (const [, xs, ys] of d.matchAll(/(-?\d+(?:\.\d+)?)[ ,](-?\d+(?:\.\d+)?)/g)) {
+      const x = Number(xs);
+      const y = Number(ys);
+      box = box === null ? { minX: x, minY: y, maxX: x, maxY: y } : {
+        minX: Math.min(box.minX, x),
+        minY: Math.min(box.minY, y),
+        maxX: Math.max(box.maxX, x),
+        maxY: Math.max(box.maxY, y)
+      };
+    }
+    return box;
+  }
+  if (tag === "text") {
+    const est = textEstimate(el);
+    return { minX: -est.width / 2, minY: 0, maxX: est.width / 2, maxY: est.height };
+  }
+  let union = null;
+  for (const child of Array.from(el.children ?? [])) {
+    const box = geometryBox(child);
+    if (box === null) continue;
+    const { dx, dy } = parseTranslate(child);
+    const shifted = {
+      minX: box.minX + dx,
+      minY: box.minY + dy,
+      maxX: box.maxX + dx,
+      maxY: box.maxY + dy
+    };
+    union = union === null ? shifted : {
+      minX: Math.min(union.minX, shifted.minX),
+      minY: Math.min(union.minY, shifted.minY),
+      maxX: Math.max(union.maxX, shifted.maxX),
+      maxY: Math.max(union.maxY, shifted.maxY)
+    };
+  }
+  return union;
+}
+function estimateBBox(el) {
+  const tag = String(el.tagName ?? "").toLowerCase();
+  if (tag !== "text" && tag !== "tspan") {
+    const box = geometryBox(el);
+    if (box !== null) {
+      return {
+        x: box.minX,
+        y: box.minY,
+        width: box.maxX - box.minX,
+        height: box.maxY - box.minY
+      };
+    }
+  }
+  const est = textEstimate(el);
+  return { x: 0, y: 0, width: est.width, height: est.height };
+}
+var MERMAID_RENDER_CONFIG = {
+  startOnLoad: false,
+  securityLevel: "strict",
+  theme: "base",
+  htmlLabels: false,
+  deterministicIds: true,
+  deterministicIDSeed: "gitiviz",
+  themeVariables: {
+    fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
+    fontSize: "14px",
+    lineColor: "#6b7280",
+    primaryTextColor: "#1f2937",
+    edgeLabelBackground: "#ffffff",
+    clusterBkg: "#f8fafc",
+    clusterBorder: "#cbd5e1"
+  },
+  flowchart: {
+    htmlLabels: false,
+    nodeSpacing: 55,
+    rankSpacing: 65,
+    padding: 12,
+    // Labels are three short lines by construction; mid-line wrapping
+    // under jsdom measures inconsistently between layout and draw, so
+    // give lines room to stay whole.
+    wrappingWidth: 480
+  }
+};
+var envPromise = null;
+async function loadEnv() {
+  if (envPromise === null) {
+    envPromise = (async () => {
+      const { JSDOM } = await import("jsdom");
+      const dom = new JSDOM(`<!DOCTYPE html><body></body>`, {
+        url: "https://localhost/"
+      });
+      const { window } = dom;
+      const g = globalThis;
+      if (g.window === void 0) g.window = window;
+      if (g.document === void 0) g.document = window.document;
+      for (const key of [
+        "SVGElement",
+        "Element",
+        "Node",
+        "HTMLElement",
+        "DocumentFragment",
+        "MutationObserver",
+        "XMLSerializer",
+        "DOMParser",
+        "CSSStyleSheet"
+      ]) {
+        if (g[key] === void 0) g[key] = window[key];
+      }
+      for (const cls of [
+        window.SVGElement,
+        window.SVGGraphicsElement,
+        window.SVGTextContentElement,
+        window.SVGSVGElement
+      ]) {
+        if (cls === void 0) continue;
+        cls.prototype.getBBox = function() {
+          return estimateBBox(this);
+        };
+        cls.prototype.getComputedTextLength = function() {
+          return String(this.textContent ?? "").length * CHAR_WIDTH;
+        };
+      }
+      window.Element.prototype.getBoundingClientRect = function() {
+        const est = estimateBBox(this);
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          width: est.width,
+          height: est.height,
+          right: est.width,
+          bottom: est.height,
+          toJSON: () => ({})
+        };
+      };
+      const mermaid = (await import("mermaid")).default;
+      mermaid.initialize({ ...MERMAID_RENDER_CONFIG });
+      return { window, mermaid };
+    })();
+  }
+  return envPromise;
+}
+var FORBIDDEN_SVG_TAGS = /* @__PURE__ */ new Set([
+  "script",
+  "foreignobject",
+  "iframe",
+  "object",
+  "embed",
+  "image",
+  "img",
+  "use",
+  "animate",
+  "animatemotion",
+  "animatetransform",
+  "set",
+  "link",
+  "meta",
+  "audio",
+  "video"
+]);
+function scrubCssUrls(css) {
+  return css.replace(/@import[^;]*;?/gi, "").replace(/url\(\s*(['"]?)(?!#)[^)]*\1\s*\)/gi, "none");
+}
+function hrefAllowed(value, allowedOrigins) {
+  if (value.startsWith("#")) return true;
+  return safeUrl(value, allowedOrigins) !== null;
+}
+async function sanitizeMermaidSvg(svg, options = {}) {
+  const allowedOrigins = options.allowedOrigins ?? [];
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<!DOCTYPE html><body>${svg}</body>`, {
+    url: "https://localhost/"
+  });
+  const root = dom.window.document.body.querySelector("svg");
+  if (root === null) return null;
+  for (const el of Array.from(root.querySelectorAll("*"))) {
+    if (FORBIDDEN_SVG_TAGS.has(el.tagName.toLowerCase())) {
+      el.remove();
+      continue;
+    }
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+      } else if (name === "href" || name === "xlink:href") {
+        if (!hrefAllowed(attr.value, allowedOrigins)) el.removeAttribute(attr.name);
+      } else if (name === "style") {
+        const scrubbed = scrubCssUrls(attr.value);
+        if (scrubbed !== attr.value) el.setAttribute(attr.name, scrubbed);
+      }
+    }
+    if (el.tagName.toLowerCase() === "style") {
+      const scrubbed = scrubCssUrls(el.textContent ?? "");
+      if (scrubbed !== el.textContent) el.textContent = scrubbed;
+    }
+  }
+  for (const attr of Array.from(root.attributes)) {
+    const name = attr.name.toLowerCase();
+    if (name.startsWith("on")) root.removeAttribute(attr.name);
+  }
+  root.setAttribute("role", "img");
+  root.removeAttribute("aria-roledescription");
+  return root.outerHTML;
+}
+var SAFE_DOM_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
+async function renderMermaidDiagram(domId, text, options = {}) {
+  if (!SAFE_DOM_ID.test(domId)) {
+    return { ok: false, reason: `unsafe diagram dom id: ${JSON.stringify(domId)}` };
+  }
+  let env;
+  try {
+    env = await loadEnv();
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `mermaid environment unavailable: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+  try {
+    const { svg } = await env.mermaid.render(domId, text);
+    const clean = await sanitizeMermaidSvg(svg, options);
+    if (clean === null) {
+      return { ok: false, reason: "mermaid produced no svg root" };
+    }
+    return { ok: true, svg: clean };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `mermaid render failed: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+}
+
+// packages/renderer/src/svgSanitizeLite.ts
+var TAG_RE = /<([A-Za-z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+function sanitizeAttrs(attrs, allowedOrigins) {
+  return attrs.replace(/\son[A-Za-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)/g, "").replace(
+    /\s(?:xlink:)?href\s*=\s*(?:"([^"]*)"|'([^']*)')/gi,
+    (match, dq, sq) => {
+      const value = dq ?? sq ?? "";
+      if (value.startsWith("#")) return match;
+      return safeUrl(value, allowedOrigins) !== null ? match : "";
+    }
+  ).replace(/\s(?:xlink:)?href\s*=\s*(?!["'])[^\s>]+/gi, "").replace(/\sstyle\s*=\s*"([^"]*)"/gi, (_m, css) => ` style="${scrubCssUrls(css)}"`).replace(/\sstyle\s*=\s*'([^']*)'/gi, (_m, css) => ` style='${scrubCssUrls(css)}'`);
+}
+function sanitizeMermaidSvgText(svg, options = {}) {
+  const allowedOrigins = options.allowedOrigins ?? [];
+  const start = svg.search(/<svg[\s>]/i);
+  const end = svg.toLowerCase().lastIndexOf("</svg>");
+  if (start < 0 || end < start) return null;
+  let out = svg.slice(start, end + "</svg>".length);
+  for (const tag of FORBIDDEN_SVG_TAGS) {
+    const paired = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?</${tag}\\s*>`, "gi");
+    let previous;
+    do {
+      previous = out;
+      out = out.replace(paired, "");
+    } while (out !== previous);
+    out = out.replace(new RegExp(`<${tag}\\b[^>]*/?>|</${tag}\\s*>`, "gi"), "");
+  }
+  out = out.replace(TAG_RE, (_match, name, attrs) => {
+    return `<${name}${sanitizeAttrs(attrs, allowedOrigins)}>`;
+  });
+  out = out.replace(
+    /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi,
+    (_m, open, css, close) => `${open}${scrubCssUrls(css)}${close}`
+  );
+  out = out.replace(/^<svg\b((?:[^>"']|"[^"]*"|'[^']*')*)>/i, (_m, attrs) => {
+    const cleaned = attrs.replace(/\saria-roledescription\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)/gi, "").replace(/\srole\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)/gi, "");
+    return `<svg${cleaned} role="img">`;
+  });
+  return out;
+}
+
+// packages/cli/src/mermaid-prerender.ts
+import { execFile as execFile2 } from "node:child_process";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { promisify } from "node:util";
+var MERMAID_DIR = "mermaid";
+var MERMAID_CONFIG_FILE = "mermaid-config.json";
+var MERMAID_CLI_IMAGE = "minlag/mermaid-cli";
+var SAFE_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
+var execFileAsync = promisify(execFile2);
+var defaultExec = async (command, args) => execFileAsync(command, args, { maxBuffer: 16 * 1024 * 1024 });
+async function sanitizeSvg(svg, allowedOrigins) {
+  try {
+    return await sanitizeMermaidSvg(svg, { allowedOrigins });
+  } catch {
+    return sanitizeMermaidSvgText(svg, { allowedOrigins });
+  }
+}
+function isEnvUnavailable(result) {
+  return !result.ok && result.reason.startsWith("mermaid environment unavailable");
+}
+async function prerenderMermaidDiagrams(sources, options, deps = {}) {
+  const localRender = deps.localRender ?? renderMermaidDiagram;
+  const exec = deps.exec ?? defaultExec;
+  const allowedOrigins = options.allowedOrigins ?? [];
+  const svgs = /* @__PURE__ */ new Map();
+  const notes = [];
+  if (sources.length === 0) return { svgs, notes };
+  const dir = join(options.outDir, MERMAID_DIR);
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, MERMAID_CONFIG_FILE),
+    `${JSON.stringify(MERMAID_RENDER_CONFIG, null, 2)}
+`,
+    "utf8"
+  );
+  const freshOnDisk = /* @__PURE__ */ new Set();
+  for (const { id, text } of sources) {
+    if (!SAFE_ID.test(id)) continue;
+    const mmdPath = join(dir, `${id}.mmd`);
+    const svgPath = join(dir, `${id}.svg`);
+    const previous = await readFile(mmdPath, "utf8").catch(() => null);
+    const svgExists = await readFile(svgPath, "utf8").then(
+      () => true,
+      () => false
+    );
+    if (previous === text && svgExists) {
+      freshOnDisk.add(id);
+    } else {
+      if (svgExists) await rm(svgPath, { force: true });
+      await writeFile(mmdPath, text, "utf8");
+    }
+  }
+  let localAvailable = true;
+  for (const { id, text } of sources) {
+    if (!SAFE_ID.test(id)) continue;
+    const result = await localRender(`gitiviz-${id}`, text, { allowedOrigins });
+    if (isEnvUnavailable(result)) {
+      localAvailable = false;
+      break;
+    }
+    if (result.ok) {
+      svgs.set(id, { text, svg: result.svg });
+    } else {
+      notes.push(
+        `mermaid: diagram "${id}" failed to render (${result.reason}) \u2014 built-in fallback`
+      );
+    }
+  }
+  if (localAvailable) {
+    if (svgs.size > 0) {
+      notes.unshift(
+        `mermaid: ${svgs.size} diagram(s) rendered with the local Mermaid toolchain`
+      );
+    }
+    return { svgs, notes };
+  }
+  svgs.clear();
+  notes.length = 0;
+  notes.push(
+    "mermaid: local mermaid/jsdom not installed \u2014 trying prerendered SVGs, then Docker"
+  );
+  let pickedUp = 0;
+  for (const { id, text } of sources) {
+    if (!freshOnDisk.has(id)) continue;
+    const raw = await readFile(join(dir, `${id}.svg`), "utf8").catch(() => null);
+    const clean = raw === null ? null : await sanitizeSvg(raw, allowedOrigins);
+    if (clean !== null) {
+      svgs.set(id, { text, svg: clean });
+      pickedUp += 1;
+    }
+  }
+  if (pickedUp > 0) {
+    notes.push(`mermaid: ${pickedUp} prerendered SVG(s) picked up from ${dir}`);
+  }
+  const missing = sources.filter((s) => SAFE_ID.test(s.id) && !svgs.has(s.id));
+  if (missing.length > 0) {
+    const dockerUp = await exec("docker", [
+      "version",
+      "--format",
+      "{{.Server.Version}}"
+    ]).then(
+      () => true,
+      () => false
+    );
+    if (!dockerUp) {
+      notes.push(
+        "mermaid: Docker unavailable \u2014 remaining diagrams use the built-in fallback engine"
+      );
+      return { svgs, notes };
+    }
+    let rendered = 0;
+    for (const { id, text } of missing) {
+      try {
+        await exec("docker", [
+          "run",
+          "--rm",
+          "-v",
+          `${dir}:/data`,
+          MERMAID_CLI_IMAGE,
+          "-q",
+          "-i",
+          `/data/${id}.mmd`,
+          "-o",
+          `/data/${id}.svg`,
+          "-c",
+          `/data/${MERMAID_CONFIG_FILE}`,
+          "-I",
+          `gitiviz-${id}`,
+          "-b",
+          "transparent"
+        ]);
+        const raw = await readFile(join(dir, `${id}.svg`), "utf8");
+        const clean = await sanitizeSvg(raw, allowedOrigins);
+        if (clean !== null) {
+          svgs.set(id, { text, svg: clean });
+          rendered += 1;
+        }
+      } catch (error) {
+        notes.push(
+          `mermaid: mermaid-cli failed for "${id}" (${error instanceof Error ? error.message : String(error)}) \u2014 built-in fallback`
+        );
+      }
+    }
+    if (rendered > 0) {
+      notes.push(`mermaid: ${rendered} diagram(s) rendered via Docker ${MERMAID_CLI_IMAGE}`);
+    }
+  }
+  return { svgs, notes };
+}
+
+// packages/cli/src/repo-origin.ts
+var REMOTE_PROTOCOLS = /* @__PURE__ */ new Set(["http:", "https:", "ssh:", "git:", "git+ssh:"]);
+function repoWebUrlFromRemote(url) {
+  const trimmed = url.trim();
+  if (trimmed === "") return null;
+  let parsed;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed)) {
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      return null;
+    }
+    if (!REMOTE_PROTOCOLS.has(parsed.protocol)) return null;
+  } else {
+    const match = /^(?:[^@/\s]+@)?([^:/\s]+):([^:\s]*\/.*)$/.exec(trimmed);
+    if (match === null) return null;
+    try {
+      parsed = new URL(`ssh://${match[1]}/${match[2]}`);
+    } catch {
+      return null;
+    }
+  }
+  const host = parsed.hostname;
+  if (host === "") return null;
+  const path = parsed.pathname.replace(/\/+$/, "").replace(/\.git$/i, "");
+  if (path === "" || path === "/") return null;
+  const isHttp = parsed.protocol === "http:";
+  const isWeb = isHttp || parsed.protocol === "https:";
+  const port = isWeb && parsed.port !== "" ? `:${parsed.port}` : "";
+  return `${isHttp ? "http" : "https"}://${host}${port}${path}`;
+}
+async function resolveRepoOrigin(inputs, getRemoteUrl = remoteOriginUrl) {
+  const env = inputs.envOrigin?.trim() ?? "";
+  if (env !== "") {
+    try {
+      const parsed = new URL(env);
+      if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+        const path = parsed.pathname.replace(/\/+$/, "");
+        return `${parsed.origin}${path}`;
+      }
+    } catch {
+    }
+    return null;
+  }
+  let remote;
+  try {
+    remote = await getRemoteUrl(inputs.repoDir);
+  } catch {
+    return null;
+  }
+  return remote === null ? null : repoWebUrlFromRemote(remote);
+}
+
 // packages/cli/src/commands/compare.ts
 var SPEC_VERSION = "0.1.0";
 var ANALYZERS = [packageAnalyzer, importExportAnalyzer, routeAnalyzer];
@@ -9952,7 +10476,7 @@ async function collectFacts(repoDir, fileChanges, headIsWorktree) {
     }
     if (fc.status !== "deleted") {
       try {
-        const content = fc.headBlob !== void 0 ? await blobContent(repoDir, fc.headBlob) : headIsWorktree ? await readFile(join(repoDir, fc.path), "utf8") : null;
+        const content = fc.headBlob !== void 0 ? await blobContent(repoDir, fc.headBlob) : headIsWorktree ? await readFile2(join2(repoDir, fc.path), "utf8") : null;
         if (content !== null) {
           analyzeOneSide(fc.path, content, headFacts, limitations);
         }
@@ -9967,13 +10491,13 @@ async function collectFacts(repoDir, fileChanges, headIsWorktree) {
   return { baseFacts, headFacts, limitations };
 }
 async function writeJson(path, value) {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}
+  await writeFile2(path, `${JSON.stringify(value, null, 2)}
 `, "utf8");
 }
 async function readJsonFile(path, hint) {
   let raw;
   try {
-    raw = await readFile(path, "utf8");
+    raw = await readFile2(path, "utf8");
   } catch {
     throw new Error(`${path} not found \u2014 ${hint}`);
   }
@@ -9987,8 +10511,8 @@ async function readJsonFile(path, hint) {
 }
 function manifestPaths(outDir) {
   return {
-    change: join(outDir, "manifests", "change.json"),
-    book: join(outDir, "manifests", "book.json")
+    change: join2(outDir, "manifests", "change.json"),
+    book: join2(outDir, "manifests", "book.json")
   };
 }
 async function loadValidatedManifests(outDir) {
@@ -10016,19 +10540,44 @@ function mergeNarration(change, response, source) {
   }
   return merged.value;
 }
-async function renderToDist(outDir, book, change, io, repoName) {
+async function renderToDist(options) {
+  const { outDir, book, change, io } = options;
+  const prerender = options.prerender ?? prerenderMermaidDiagrams;
+  const repoOrigin = options.repoOrigin ?? null;
+  let originHost = null;
+  if (repoOrigin !== null) {
+    try {
+      originHost = new URL(repoOrigin).origin;
+    } catch {
+      originHost = null;
+    }
+  }
+  const headSha = options.headSha !== void 0 && options.headSha !== WORKTREE ? options.headSha : void 0;
+  const allowedOrigins = originHost !== null ? [originHost] : [];
+  const mermaidOptions = {
+    ...repoOrigin !== null && originHost !== null && headSha !== void 0 ? { linkBase: `${repoOrigin}/blob/${headSha}` } : {},
+    ...allowedOrigins.length > 0 ? { allowedOrigins } : {}
+  };
+  const sources = collectMermaidSources(book, change, mermaidOptions);
+  const { svgs, notes } = await prerender(sources, { outDir, allowedOrigins });
+  for (const note of notes) io.out(note);
   const html = renderChangeBook(book, change, {
     renderDiagram: compileDiagram,
-    ...repoName !== void 0 ? { repoName } : {}
+    ...options.repoName !== void 0 ? { repoName: options.repoName } : {},
+    mermaid: { ...mermaidOptions, svgs }
   });
-  await mkdir(join(outDir, "dist"), { recursive: true });
-  const htmlPath = join(outDir, "dist", "index.html");
-  await writeFile(htmlPath, html, "utf8");
+  await mkdir2(join2(outDir, "dist"), { recursive: true });
+  const htmlPath = join2(outDir, "dist", "index.html");
+  await writeFile2(htmlPath, html, "utf8");
   io.out(`wrote ${htmlPath}`);
 }
 async function runCompare(options) {
   const { repoDir, outDir, baseRef, headRef, io } = options;
   const repoName = options.repoName ?? await resolveRepoName({ repoDir });
+  const repoOrigin = await resolveRepoOrigin({
+    repoDir,
+    envOrigin: options.repoOrigin
+  });
   const baseSha = await resolveRef(repoDir, baseRef);
   const headIsWorktree = headRef === WORKTREE;
   const headSha = headIsWorktree ? WORKTREE : await resolveRef(repoDir, headRef);
@@ -10071,20 +10620,20 @@ async function runCompare(options) {
     );
   }
   const paths = manifestPaths(outDir);
-  await mkdir(join(outDir, "manifests"), { recursive: true });
+  await mkdir2(join2(outDir, "manifests"), { recursive: true });
   await writeJson(paths.change, manifest);
   io.out(`wrote ${paths.change}`);
   await writeJson(paths.book, book);
   io.out(`wrote ${paths.book}`);
   const request = buildNarrationRequest(manifest);
-  const requestPath = join(outDir, "narration-request.json");
+  const requestPath = join2(outDir, "narration-request.json");
   await writeJson(requestPath, request);
   io.out(`wrote ${requestPath}`);
-  const responsePath = join(outDir, "narration-response.json");
+  const responsePath = join2(outDir, "narration-response.json");
   let narrated;
   let responseRaw;
   try {
-    responseRaw = JSON.parse(await readFile(responsePath, "utf8"));
+    responseRaw = JSON.parse(await readFile2(responsePath, "utf8"));
   } catch (error) {
     if (error.code !== "ENOENT") {
       throw new Error(
@@ -10099,7 +10648,15 @@ async function runCompare(options) {
     narrated = applyTemplateNarration(manifest);
     io.out("no narration-response.json \u2014 used the deterministic template narrator");
   }
-  await renderToDist(outDir, book, narrated, io, repoName);
+  await renderToDist({
+    outDir,
+    book,
+    change: narrated,
+    io,
+    repoName,
+    repoOrigin,
+    headSha
+  });
 }
 async function refExists(repoDir, ref) {
   try {
@@ -10128,6 +10685,7 @@ async function runBranch(options) {
     baseRef: baseSha,
     headRef: "HEAD",
     ...options.repoName !== void 0 ? { repoName: options.repoName } : {},
+    ...options.repoOrigin !== void 0 ? { repoOrigin: options.repoOrigin } : {},
     io
   });
 }
@@ -10157,16 +10715,17 @@ async function runInit(options) {
     baseRef: baseSha,
     headRef: headSha,
     ...options.repoName !== void 0 ? { repoName: options.repoName } : {},
+    ...options.repoOrigin !== void 0 ? { repoOrigin: options.repoOrigin } : {},
     io
   });
   io.out(
     [
       "",
       "Next steps (the story loop):",
-      `  1. Read ${join(outDir, "narration-request.json")} \u2014 it lists the only entity/`,
+      `  1. Read ${join2(outDir, "narration-request.json")} \u2014 it lists the only entity/`,
       "     change-unit ids you may reference, the evidenceFiles inventory diagram",
       "     nodes must anchor to, and the diagram caps (diagramLimits).",
-      `  2. Write ${join(outDir, "narration-response.json")} with the project summary,`,
+      `  2. Write ${join2(outDir, "narration-response.json")} with the project summary,`,
       "     chapters, architectureDiagram, and a story per change unit.",
       "  3. Run `gitiviz apply-narration` to validate, merge, and re-render the book."
     ].join("\n")
@@ -10180,6 +10739,7 @@ async function runCommit(options) {
     baseRef: `${headSha}~1`,
     headRef: headSha,
     ...options.repoName !== void 0 ? { repoName: options.repoName } : {},
+    ...options.repoOrigin !== void 0 ? { repoOrigin: options.repoOrigin } : {},
     io: options.io
   });
 }
@@ -10190,14 +10750,27 @@ async function runValidate(options) {
 async function runApplyNarration(options) {
   const { outDir, io } = options;
   const { change, book } = await loadValidatedManifests(outDir);
-  const responsePath = join(outDir, "narration-response.json");
+  const responsePath = join2(outDir, "narration-response.json");
   const responseRaw = await readJsonFile(
     responsePath,
     "write one from narration-request.json first"
   );
   const narrated = mergeNarration(change, responseRaw, responsePath);
   io.out(`merged narration from ${responsePath}`);
-  await renderToDist(outDir, book, narrated, io, options.repoName);
+  const repoOrigin = options.repoDir !== void 0 || options.repoOrigin !== void 0 ? await resolveRepoOrigin({
+    repoDir: options.repoDir ?? ".",
+    envOrigin: options.repoOrigin
+  }) : null;
+  await renderToDist({
+    outDir,
+    book,
+    change: narrated,
+    io,
+    repoName: options.repoName,
+    repoOrigin,
+    // The manifest's head revision is the sha the analysis actually saw.
+    headSha: change.headRevision
+  });
 }
 
 // packages/cli/src/index.ts
@@ -10269,9 +10842,11 @@ async function runCli(argv, io = defaultIo, env = process.env) {
   }
   const [command, ...rest] = parsed.positionals;
   const repoDir = resolve2(parsed.repo ?? ".");
-  const outDir = resolve2(parsed.out ?? join2(repoDir, ".gitiviz"));
+  const outDir = resolve2(parsed.out ?? join3(repoDir, ".gitiviz"));
   const explicitName = [parsed.name, env["GITIVIZ_REPO_NAME"]].map((v) => v?.trim() ?? "").find((v) => v !== "") ?? void 0;
   const named = explicitName !== void 0 ? { repoName: explicitName } : {};
+  const explicitOrigin = env["GITIVIZ_REPO_ORIGIN"]?.trim();
+  const origined = explicitOrigin !== void 0 && explicitOrigin !== "" ? { repoOrigin: explicitOrigin } : {};
   if (parsed.commits !== void 0 && command !== "init") {
     io.err('gitiviz: --commits is only valid for "init"');
     io.err(USAGE);
@@ -10286,6 +10861,7 @@ async function runCli(argv, io = defaultIo, env = process.env) {
           outDir,
           commits: parsed.commits ?? DEFAULT_INIT_COMMITS,
           ...named,
+          ...origined,
           io
         });
         return 0;
@@ -10297,19 +10873,26 @@ async function runCli(argv, io = defaultIo, env = process.env) {
           baseRef: rest[0],
           headRef: rest[1],
           ...named,
+          ...origined,
           io
         });
         return 0;
       case "branch": {
         expectArgs("branch", rest, 0, 1);
-        const options = { repoDir, outDir, ...named, io };
+        const options = {
+          repoDir,
+          outDir,
+          ...named,
+          ...origined,
+          io
+        };
         if (rest[0] !== void 0) options.baseRef = rest[0];
         await runBranch(options);
         return 0;
       }
       case "commit":
         expectArgs("commit", rest, 1, 1);
-        await runCommit({ repoDir, outDir, ref: rest[0], ...named, io });
+        await runCommit({ repoDir, outDir, ref: rest[0], ...named, ...origined, io });
         return 0;
       case "validate":
         expectArgs("validate", rest, 0, 0);
@@ -10317,7 +10900,7 @@ async function runCli(argv, io = defaultIo, env = process.env) {
         return 0;
       case "apply-narration":
         expectArgs("apply-narration", rest, 0, 0);
-        await runApplyNarration({ outDir, ...named, io });
+        await runApplyNarration({ outDir, repoDir, ...named, ...origined, io });
         return 0;
       case void 0:
         io.err("gitiviz: no command given");

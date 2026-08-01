@@ -167,6 +167,44 @@ function estimateBBox(el: DomElement): { x: number; y: number; width: number; he
   return { x: 0, y: 0, width: est.width, height: est.height };
 }
 
+/**
+ * The one Mermaid configuration for every render engine gitiviz uses —
+ * the in-process jsdom path below AND the mermaid-cli Docker fallback the
+ * CLI writes this object out for (as mermaid-config.json). Locked down:
+ * securityLevel "strict", htmlLabels false (labels are plain SVG <text>,
+ * never <foreignObject> HTML), deterministic ids, light "base" theme
+ * matching the book shell. All values are constants — nothing here is
+ * repo-controlled.
+ */
+export const MERMAID_RENDER_CONFIG = {
+  startOnLoad: false,
+  securityLevel: "strict",
+  theme: "base",
+  htmlLabels: false,
+  deterministicIds: true,
+  deterministicIDSeed: "gitiviz",
+  themeVariables: {
+    fontFamily:
+      '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
+    fontSize: "14px",
+    lineColor: "#6b7280",
+    primaryTextColor: "#1f2937",
+    edgeLabelBackground: "#ffffff",
+    clusterBkg: "#f8fafc",
+    clusterBorder: "#cbd5e1"
+  },
+  flowchart: {
+    htmlLabels: false,
+    nodeSpacing: 55,
+    rankSpacing: 65,
+    padding: 12,
+    // Labels are three short lines by construction; mid-line wrapping
+    // under jsdom measures inconsistently between layout and draw, so
+    // give lines room to stay whole.
+    wrappingWidth: 480
+  }
+} as const;
+
 interface MermaidEnv {
   window: DomElement;
   mermaid: DomElement;
@@ -230,37 +268,7 @@ async function loadEnv(): Promise<MermaidEnv> {
       };
 
       const mermaid = (await import("mermaid")).default as DomElement;
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: "strict",
-        theme: "base",
-        htmlLabels: false,
-        deterministicIds: true,
-        deterministicIDSeed: "gitiviz",
-        // Light theme matching the book shell: system fonts, white edge-
-        // label plates, quiet gray lines. All values are constants —
-        // nothing here is repo-controlled.
-        themeVariables: {
-          fontFamily:
-            '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
-          fontSize: "14px",
-          lineColor: "#6b7280",
-          primaryTextColor: "#1f2937",
-          edgeLabelBackground: "#ffffff",
-          clusterBkg: "#f8fafc",
-          clusterBorder: "#cbd5e1"
-        },
-        flowchart: {
-          htmlLabels: false,
-          nodeSpacing: 55,
-          rankSpacing: 65,
-          padding: 12,
-          // Labels are three short lines by construction; mid-line
-          // wrapping under jsdom measures inconsistently between layout
-          // and draw, so give lines room to stay whole.
-          wrappingWidth: 480
-        }
-      });
+      mermaid.initialize({ ...MERMAID_RENDER_CONFIG });
       return { window, mermaid };
     })();
   }
@@ -272,7 +280,12 @@ async function loadEnv(): Promise<MermaidEnv> {
 // SVG sanitizer (defense in depth over mermaid's own strict mode)
 // ---------------------------------------------------------------------------
 
-const FORBIDDEN_TAGS = new Set([
+/**
+ * Elements never allowed in a rendered diagram. Shared with the
+ * dependency-free text sanitizer (svgSanitizeLite.ts) so both enforce the
+ * same policy.
+ */
+export const FORBIDDEN_SVG_TAGS: ReadonlySet<string> = new Set([
   "script",
   "foreignobject",
   "iframe",
@@ -292,7 +305,7 @@ const FORBIDDEN_TAGS = new Set([
 ]);
 
 /** Strip url(...) values unless they reference a local #fragment. */
-function scrubCssUrls(css: string): string {
+export function scrubCssUrls(css: string): string {
   return css
     .replace(/@import[^;]*;?/gi, "")
     .replace(/url\(\s*(['"]?)(?!#)[^)]*\1\s*\)/gi, "none");
@@ -322,7 +335,7 @@ export async function sanitizeMermaidSvg(
 
   // Element pass (snapshot first — we mutate as we go).
   for (const el of Array.from(root.querySelectorAll("*"))) {
-    if (FORBIDDEN_TAGS.has(el.tagName.toLowerCase())) {
+    if (FORBIDDEN_SVG_TAGS.has(el.tagName.toLowerCase())) {
       el.remove();
       continue;
     }

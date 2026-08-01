@@ -7,9 +7,12 @@
  *
  * Run via `pnpm bundle` (inside ./dev.sh). The outputs are the distribution:
  * single ESM files whose only imports are node: builtins (ajv and the spec
- * JSON Schemas are embedded). After bundling, every import/require specifier
- * in each artifact is verified to be a node: builtin — the build fails
- * otherwise, so a dependency can never sneak into the committed scripts.
+ * JSON Schemas are embedded), plus fail-soft dynamic imports of the two
+ * optional diagram engines (jsdom, mermaid) that degrade to the mermaid-cli
+ * Docker image or the built-in engine when absent. After bundling, every
+ * import/require specifier in each artifact is verified against exactly
+ * that policy — the build fails otherwise, so a hard dependency can never
+ * sneak into the committed scripts.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -30,6 +33,16 @@ const ENTRIES = [
 ];
 
 /**
+ * Modules the bundle may *optionally* load at runtime via a fail-soft
+ * dynamic import (packages/renderer/src/mermaidSvg.ts): when they are not
+ * installed the CLI falls back to mermaid-cli-via-Docker, then to the
+ * built-in diagram engine. They must stay external — bundling mermaid and
+ * jsdom would balloon the artifact and drag in native/optional deps — and
+ * they are the ONLY non-builtin specifiers allowed, dynamic-import only.
+ */
+const OPTIONAL_DYNAMIC_IMPORTS = new Set(["jsdom", "mermaid"]);
+
+/**
  * Every static import and require specifier in the bundle. esbuild with
  * platform=node keeps node builtins as real imports; anything else appearing
  * here means the bundle silently depends on the environment.
@@ -43,10 +56,14 @@ function externalSpecifiers(source) {
   // esbuild's shim for a require() it could not resolve/inline; its presence
   // with any specifier means the bundle depends on the environment.
   const shimRequireRe = /__require\(\s*["']([^"']+)["']\s*\)/g;
-  // Dynamic import of a literal specifier.
+  // Dynamic import of a literal specifier: hard dependency unless the
+  // specifier is on the fail-soft optional list.
   const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-  for (const re of [importRe, shimRequireRe, dynamicImportRe]) {
+  for (const re of [importRe, shimRequireRe]) {
     for (const match of source.matchAll(re)) specifiers.push(match[1]);
+  }
+  for (const match of source.matchAll(dynamicImportRe)) {
+    if (!OPTIONAL_DYNAMIC_IMPORTS.has(match[1])) specifiers.push(match[1]);
   }
   return specifiers.filter((s) => !s.startsWith("node:"));
 }
@@ -62,6 +79,8 @@ for (const { entry, outfile } of ENTRIES) {
     platform: "node",
     format: "esm",
     target: "node20",
+    // Optional, fail-soft engines — never inlined (see OPTIONAL_DYNAMIC_IMPORTS).
+    external: [...OPTIONAL_DYNAMIC_IMPORTS],
     banner: { js: BANNER },
     logLevel: "warning"
   });
