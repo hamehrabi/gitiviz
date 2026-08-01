@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Entity } from "@gitiviz/schema";
 import {
@@ -109,6 +111,44 @@ describe("buildChangeUnits on the demo fixture branch", () => {
     }
   });
 
+  it("persists sorted touched paths as evidence on non-grouped units", async () => {
+    const { changeUnits } = await buildChangeUnits({
+      repoDir,
+      baseRef: "main",
+      headRef: DEMO_FEATURE_BRANCH
+    });
+    // Commit 1 adds the validation module and edits the routes file.
+    expect(changeUnits[0]!.evidence?.map((anchor) => anchor.path)).toEqual([
+      "src/routes/orders.ts",
+      "src/validation/guest.ts"
+    ]);
+  });
+
+  it("records BOTH sides of a rename as evidence", async () => {
+    const { changeUnits } = await buildChangeUnits({
+      repoDir,
+      baseRef: "main",
+      headRef: DEMO_FEATURE_BRANCH
+    });
+    // Commit 2 renames orderService -> checkoutService and edits the routes.
+    expect(changeUnits[1]!.evidence?.map((anchor) => anchor.path)).toEqual([
+      "src/routes/orders.ts",
+      "src/services/checkoutService.ts",
+      "src/services/orderService.ts"
+    ]);
+  });
+
+  it("gives grouped units no evidence", async () => {
+    const { changeUnits } = await buildChangeUnits({
+      repoDir,
+      baseRef: "main",
+      headRef: DEMO_FEATURE_BRANCH
+    });
+    // The fixup! and whitespace-only commits have no chapter, so no Sources.
+    expect(changeUnits[2]!.evidence).toBeUndefined();
+    expect(changeUnits[3]!.evidence).toBeUndefined();
+  });
+
   it("is deterministic: same input, same units and ids", async () => {
     const input = { repoDir, baseRef: "main", headRef: DEMO_FEATURE_BRANCH };
     const first = await buildChangeUnits(input);
@@ -174,4 +214,38 @@ describe("buildChangeUnits classification of merges and squash! commits", () => 
       await removeRepo(repoDir);
     }
   });
+});
+
+describe("buildChangeUnits evidence cap on huge commits", () => {
+  it("caps evidence at 500 sorted paths and records an honest limitation", async () => {
+    const repoDir = await makeRepo();
+    try {
+      await commitFile(repoDir, "a.txt", "a\n", "base commit");
+      // One commit touching 501 files, zero-padded so sort order is obvious.
+      for (let i = 0; i <= 500; i += 1) {
+        const path = join(repoDir, "files", `${String(i).padStart(4, "0")}.txt`);
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, `${i}\n`, "utf8");
+      }
+      await runGit(repoDir, ["add", "--all"]);
+      await runGit(repoDir, ["commit", "-m", "feat: many files"]);
+
+      const { changeUnits, analysisLimitations } = await buildChangeUnits({
+        repoDir,
+        baseRef: "main~1",
+        headRef: "main"
+      });
+      expect(changeUnits).toHaveLength(1);
+      const paths = changeUnits[0]!.evidence!.map((anchor) => anchor.path);
+      expect(paths).toHaveLength(500);
+      expect(paths[0]).toBe("files/0000.txt");
+      expect(paths[499]).toBe("files/0499.txt");
+      expect(paths).not.toContain("files/0500.txt");
+      const capNote = analysisLimitations.find((l) => l.message.includes("501 paths"));
+      expect(capNote, JSON.stringify(analysisLimitations)).toBeDefined();
+      expect(capNote!.message).toContain("500");
+    } finally {
+      await removeRepo(repoDir);
+    }
+  }, 120_000);
 });

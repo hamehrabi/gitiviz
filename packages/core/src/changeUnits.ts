@@ -12,6 +12,11 @@
  * verbatim commit subjects (hostile data — escaped only at render time);
  * human titles stay null for the narrator to fill in (as "inferred").
  *
+ * Non-grouped units additionally persist the commit's touched paths (old and
+ * new sides of renames) as sorted evidence anchors — the renderer's Sources
+ * list links to them. Capped at MAX_EVIDENCE_PATHS with an honest
+ * analysisLimitation on truncation; grouped units carry no evidence.
+ *
  * Classification failures never crash the build: the affected commit keeps a
  * conservative ungrouped unit and the failure is recorded in
  * analysisLimitations.
@@ -25,6 +30,9 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /** Defensive cap on stored subject length (hostile repo data). */
 const MAX_SUBJECT_LENGTH = 2000;
+
+/** Cap on touched paths persisted as a unit's evidence (huge commits). */
+const MAX_EVIDENCE_PATHS = 500;
 
 export interface ChangeUnitsInput {
   repoDir: string;
@@ -193,15 +201,36 @@ export async function buildChangeUnits(
       });
     }
 
-    if (entities.length > 0) {
+    // Touched paths feed two derived facts: entity attachment (all units)
+    // and the persisted evidence anchors (non-grouped units only — grouped
+    // commits have no chapter for a Sources list to live on).
+    const wantsEvidence = unit.grouped !== true;
+    if (wantsEvidence || entities.length > 0) {
       try {
-        unit.entities = attachedEntityIds(entities, await touchedPaths(repoDir, commit));
+        const paths = await touchedPaths(repoDir, commit);
+        if (entities.length > 0) {
+          unit.entities = attachedEntityIds(entities, paths);
+        }
+        if (wantsEvidence && paths.size > 0) {
+          const sorted = [...paths].sort();
+          if (sorted.length > MAX_EVIDENCE_PATHS) {
+            limitations.push({
+              message:
+                `Commit ${commit.sha} touched ${sorted.length} paths; only the ` +
+                `first ${MAX_EVIDENCE_PATHS} (sorted) are recorded as its ` +
+                "change unit's evidence."
+            });
+          }
+          unit.evidence = sorted
+            .slice(0, MAX_EVIDENCE_PATHS)
+            .map((path) => ({ path }));
+        }
       } catch (error) {
         limitations.push({
           message:
             `Could not list files touched by commit ${commit.sha}: ` +
             `${error instanceof Error ? error.message : String(error)}. ` +
-            "No entities attached to its change unit."
+            "No entities attached to its change unit and no evidence paths recorded."
         });
       }
     }
