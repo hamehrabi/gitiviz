@@ -253,9 +253,14 @@ export interface MermaidSource {
   text: string;
 }
 
-/** Honest note shown when a diagram fell back to the built-in engine. */
+/**
+ * Honest note shown when a diagram fell back to the built-in engine. The
+ * plugin ships Mermaid itself, so this should never appear in practice —
+ * it means even the bundled engine failed to load, and the reader deserves
+ * to know which engine actually drew what they are looking at.
+ */
 const MERMAID_FALLBACK_NOTE =
-  "Rendered with the built-in diagram engine — Mermaid was unavailable at build time.";
+  "Rendered with the built-in diagram engine — the bundled Mermaid engine could not load here.";
 
 /** Every evidence path in the manifest — the only files clicks may target. */
 function evidenceFiles(change: ChangeManifest): ReadonlySet<string> {

@@ -139,6 +139,8 @@ structural — `derived` cannot be claimed by a narrator.
 - The plugin's analysis scripts are committed, dependency-free Node bundles —
   installing the plugin never runs `npm install`. They need Node.js 20+, or
   Docker as a fallback (the launcher picks whichever is available).
+- The diagram engine (Mermaid) ships **inside** the plugin, so diagrams render
+  the same way on every machine: offline, no Docker, nothing to download.
 
 ### Commands
 

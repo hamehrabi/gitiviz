@@ -1,8 +1,10 @@
 /**
  * Prerender chain tests. Chain link (a) runs the REAL renderer pipeline
- * (mermaid + jsdom are installed in the dev container); links (b1)/(b2)
- * are driven through the injectable seams: a localRender stub that reports
- * the environment unavailable and an exec stub standing in for Docker.
+ * (the Mermaid engine module); links (b1)/(b2) are driven through the
+ * injectable seams: a localRender stub that reports the environment
+ * unavailable and an exec stub standing in for Docker. The proof that the
+ * SHIPPED engine renders on a machine with no node_modules and no Docker
+ * lives in tests/bundle.test.ts.
  */
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -57,13 +59,13 @@ describe("prerenderMermaidDiagrams", () => {
     expect(config.flowchart.htmlLabels).toBe(false);
   });
 
-  it("chain (a): renders in-process with the real local toolchain", async () => {
+  it("chain (a): renders in-process with the real Mermaid engine", async () => {
     const outDir = await newOutDir();
     const { svgs, notes } = await prerenderMermaidDiagrams(SOURCES, { outDir });
     expect(svgs.size).toBe(2);
     expect(svgs.get("architecture")!.svg.startsWith("<svg")).toBe(true);
     expect(svgs.get("architecture")!.text).toBe(SOURCES[0]!.text);
-    expect(notes.join("\n")).toContain("local Mermaid toolchain");
+    expect(notes.join("\n")).toContain("bundled Mermaid engine");
   });
 
   it("chain (b1): picks up fresh disk SVGs, sanitized", async () => {

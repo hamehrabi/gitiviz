@@ -106,6 +106,12 @@ importers:
       '@gitiviz/schema':
         specifier: workspace:*
         version: link:../schema
+      jsdom:
+        specifier: ^25.0.0
+        version: 25.0.1
+      mermaid:
+        specifier: ^11.4.0
+        version: 11.16.0
     devDependencies:
       '@types/jsdom':
         specifier: ^21.1.7
@@ -116,12 +122,6 @@ importers:
       happy-dom:
         specifier: ^15.11.0
         version: 15.11.7
-      jsdom:
-        specifier: ^25.0.0
-        version: 25.0.1
-      mermaid:
-        specifier: ^11.4.0
-        version: 11.16.0
 
   packages/schema:
     dependencies:

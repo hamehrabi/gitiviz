@@ -5,9 +5,12 @@
 # repo, so run this from inside the repository you want analyzed.
 #
 # Mermaid rendering chain (docs/decisions/0002-mermaid-render-chain.md):
-#   (a) the CLI imports local mermaid+jsdom when installed;
-#   (b) otherwise it renders via the minlag/mermaid-cli Docker image —
-#       with host Node the CLI drives Docker itself; in the Docker
+#   (a) the CLI renders with the Mermaid engine shipped BESIDE this script
+#       (mermaid-engine.mjs) — real Mermaid, in-process, offline, no
+#       install and nothing to download. This is the normal path and it
+#       works on any machine;
+#   (b) only if that engine cannot load: the minlag/mermaid-cli Docker
+#       image — with host Node the CLI drives Docker itself; in the Docker
 #       fallback below Docker is unreachable from inside the container,
 #       so THIS script runs the mermaid-cli pass host-side between two
 #       CLI runs (analyze writes <out>/mermaid/*.mmd; the second run

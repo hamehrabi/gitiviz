@@ -9722,7 +9722,7 @@ function anchorLine2(anchor) {
   }
   return `<li>${DERIVED_MARK2} <code>${text}</code></li>`;
 }
-var MERMAID_FALLBACK_NOTE = "Rendered with the built-in diagram engine \u2014 Mermaid was unavailable at build time.";
+var MERMAID_FALLBACK_NOTE = "Rendered with the built-in diagram engine \u2014 the bundled Mermaid engine could not load here.";
 function evidenceFiles(change) {
   const files = /* @__PURE__ */ new Set();
   const collect = (anchors) => {
@@ -10135,94 +10135,8 @@ function renderChangeBook(book, change, options = {}) {
 }
 
 // packages/renderer/src/mermaidSvg.ts
-var CHAR_WIDTH = 8;
-var LINE_HEIGHT = 24;
-var GEO_SKIP_TAGS = /* @__PURE__ */ new Set(["style", "defs", "marker", "title", "desc"]);
-function textEstimate(el) {
-  const rows = Array.from(
-    el.querySelectorAll?.(".text-outer-tspan") ?? []
-  );
-  if (rows.length > 0) {
-    let width2 = 0;
-    for (const row of rows) {
-      width2 = Math.max(width2, String(row.textContent ?? "").length * CHAR_WIDTH);
-    }
-    return { width: width2, height: rows.length * LINE_HEIGHT };
-  }
-  const lines = String(el.textContent ?? "").split("\n");
-  const width = Math.max(...lines.map((l) => l.length), 1) * CHAR_WIDTH;
-  return { width, height: lines.length * LINE_HEIGHT };
-}
-function parseTranslate(el) {
-  const transform = el.getAttribute?.("transform") ?? "";
-  const match = /translate\(\s*(-?[\d.]+)[ ,]\s*(-?[\d.]+)\s*\)/.exec(transform);
-  return match ? { dx: Number(match[1]), dy: Number(match[2]) } : { dx: 0, dy: 0 };
-}
-function geometryBox(el) {
-  const tag = String(el.tagName ?? "").toLowerCase();
-  if (GEO_SKIP_TAGS.has(tag)) return null;
-  if (tag === "rect") {
-    const x = Number(el.getAttribute("x") ?? 0);
-    const y = Number(el.getAttribute("y") ?? 0);
-    const w = Number(el.getAttribute("width") ?? 0);
-    const h = Number(el.getAttribute("height") ?? 0);
-    if (!Number.isFinite(x + y + w + h) || w === 0 && h === 0) return null;
-    return { minX: x, minY: y, maxX: x + w, maxY: y + h };
-  }
-  if (tag === "path") {
-    const d = el.getAttribute("d") ?? "";
-    let box = null;
-    for (const [, xs, ys] of d.matchAll(/(-?\d+(?:\.\d+)?)[ ,](-?\d+(?:\.\d+)?)/g)) {
-      const x = Number(xs);
-      const y = Number(ys);
-      box = box === null ? { minX: x, minY: y, maxX: x, maxY: y } : {
-        minX: Math.min(box.minX, x),
-        minY: Math.min(box.minY, y),
-        maxX: Math.max(box.maxX, x),
-        maxY: Math.max(box.maxY, y)
-      };
-    }
-    return box;
-  }
-  if (tag === "text") {
-    const est = textEstimate(el);
-    return { minX: -est.width / 2, minY: 0, maxX: est.width / 2, maxY: est.height };
-  }
-  let union = null;
-  for (const child of Array.from(el.children ?? [])) {
-    const box = geometryBox(child);
-    if (box === null) continue;
-    const { dx, dy } = parseTranslate(child);
-    const shifted = {
-      minX: box.minX + dx,
-      minY: box.minY + dy,
-      maxX: box.maxX + dx,
-      maxY: box.maxY + dy
-    };
-    union = union === null ? shifted : {
-      minX: Math.min(union.minX, shifted.minX),
-      minY: Math.min(union.minY, shifted.minY),
-      maxX: Math.max(union.maxX, shifted.maxX),
-      maxY: Math.max(union.maxY, shifted.maxY)
-    };
-  }
-  return union;
-}
-function estimateBBox(el) {
-  const tag = String(el.tagName ?? "").toLowerCase();
-  if (tag !== "text" && tag !== "tspan") {
-    const box = geometryBox(el);
-    if (box !== null) {
-      return {
-        x: box.minX,
-        y: box.minY,
-        width: box.maxX - box.minX,
-        height: box.maxY - box.minY
-      };
-    }
-  }
-  const est = textEstimate(el);
-  return { x: 0, y: 0, width: est.width, height: est.height };
+async function engineModule() {
+  return import("./mermaid-engine.mjs");
 }
 var MERMAID_RENDER_CONFIG = {
   startOnLoad: false,
@@ -10251,65 +10165,11 @@ var MERMAID_RENDER_CONFIG = {
     wrappingWidth: 480
   }
 };
-var envPromise = null;
-async function loadEnv() {
-  if (envPromise === null) {
-    envPromise = (async () => {
-      const { JSDOM } = await import("jsdom");
-      const dom = new JSDOM(`<!DOCTYPE html><body></body>`, {
-        url: "https://localhost/"
-      });
-      const { window } = dom;
-      const g = globalThis;
-      if (g.window === void 0) g.window = window;
-      if (g.document === void 0) g.document = window.document;
-      for (const key of [
-        "SVGElement",
-        "Element",
-        "Node",
-        "HTMLElement",
-        "DocumentFragment",
-        "MutationObserver",
-        "XMLSerializer",
-        "DOMParser",
-        "CSSStyleSheet"
-      ]) {
-        if (g[key] === void 0) g[key] = window[key];
-      }
-      for (const cls of [
-        window.SVGElement,
-        window.SVGGraphicsElement,
-        window.SVGTextContentElement,
-        window.SVGSVGElement
-      ]) {
-        if (cls === void 0) continue;
-        cls.prototype.getBBox = function() {
-          return estimateBBox(this);
-        };
-        cls.prototype.getComputedTextLength = function() {
-          return String(this.textContent ?? "").length * CHAR_WIDTH;
-        };
-      }
-      window.Element.prototype.getBoundingClientRect = function() {
-        const est = estimateBBox(this);
-        return {
-          x: 0,
-          y: 0,
-          top: 0,
-          left: 0,
-          width: est.width,
-          height: est.height,
-          right: est.width,
-          bottom: est.height,
-          toJSON: () => ({})
-        };
-      };
-      const mermaid = (await import("mermaid")).default;
-      mermaid.initialize({ ...MERMAID_RENDER_CONFIG });
-      return { window, mermaid };
-    })();
-  }
-  return envPromise;
+async function loadDomApi() {
+  return (await engineModule()).loadDom();
+}
+async function loadRenderer() {
+  return (await engineModule()).loadMermaidRenderer({ ...MERMAID_RENDER_CONFIG });
 }
 var FORBIDDEN_SVG_TAGS = /* @__PURE__ */ new Set([
   "script",
@@ -10338,11 +10198,9 @@ function hrefAllowed(value, allowedOrigins) {
 }
 async function sanitizeMermaidSvg(svg, options = {}) {
   const allowedOrigins = options.allowedOrigins ?? [];
-  const { JSDOM } = await import("jsdom");
-  const dom = new JSDOM(`<!DOCTYPE html><body>${svg}</body>`, {
-    url: "https://localhost/"
-  });
-  const root = dom.window.document.body.querySelector("svg");
+  const dom = await loadDomApi();
+  const document = dom.parseDocument(`<!DOCTYPE html><body>${svg}</body>`);
+  const root = document.body.querySelector("svg");
   if (root === null) return null;
   for (const el of Array.from(root.querySelectorAll("*"))) {
     if (FORBIDDEN_SVG_TAGS.has(el.tagName.toLowerCase())) {
@@ -10378,9 +10236,9 @@ async function renderMermaidDiagram(domId, text, options = {}) {
   if (!SAFE_DOM_ID.test(domId)) {
     return { ok: false, reason: `unsafe diagram dom id: ${JSON.stringify(domId)}` };
   }
-  let env;
+  let renderer;
   try {
-    env = await loadEnv();
+    renderer = await loadRenderer();
   } catch (error) {
     return {
       ok: false,
@@ -10388,7 +10246,7 @@ async function renderMermaidDiagram(domId, text, options = {}) {
     };
   }
   try {
-    const { svg } = await env.mermaid.render(domId, text);
+    const svg = await renderer.render(domId, text);
     const clean = await sanitizeMermaidSvg(svg, options);
     if (clean === null) {
       return { ok: false, reason: "mermaid produced no svg root" };
@@ -10527,7 +10385,7 @@ async function prerenderMermaidDiagrams(sources, options, deps = {}) {
   if (localAvailable) {
     if (svgs.size > 0) {
       notes.unshift(
-        `mermaid: ${svgs.size} diagram(s) rendered with the local Mermaid toolchain`
+        `mermaid: ${svgs.size} diagram(s) rendered with the bundled Mermaid engine`
       );
     }
     return { svgs, notes };
@@ -10535,7 +10393,7 @@ async function prerenderMermaidDiagrams(sources, options, deps = {}) {
   svgs.clear();
   notes.length = 0;
   notes.push(
-    "mermaid: local mermaid/jsdom not installed \u2014 trying prerendered SVGs, then Docker"
+    "mermaid: bundled Mermaid engine could not load \u2014 trying prerendered SVGs, then Docker"
   );
   let pickedUp = 0;
   for (const { id, text } of sources) {

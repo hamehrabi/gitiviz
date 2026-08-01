@@ -1,10 +1,12 @@
 /**
  * Build-time Mermaid rendering — REAL mermaid, no browser, no network.
  *
- * Mermaid v11 runs server-side under jsdom inside the Docker container:
- * jsdom has no layout engine, so deterministic text-metric stubs
- * (character-width estimates) stand in for getBBox/getComputedTextLength.
- * The same input therefore always yields byte-identical SVG.
+ * The engine (a DOM plus Mermaid itself, with deterministic text-metric
+ * stubs) lives in mermaidEngine.ts and is loaded through a dynamic import.
+ * That single seam is what lets the shipped plugin CARRY Mermaid: the
+ * bundler emits the engine as one self-contained sibling artifact that the
+ * plugin scripts load by relative path, so real Mermaid renders on any
+ * machine, offline, with no Docker and no downloads.
  *
  * Configuration is locked down: securityLevel "strict", htmlLabels false
  * (labels become plain SVG <text>, never <foreignObject> HTML), theme
@@ -17,20 +19,29 @@
  *     is not a #fragment reference,
  *   - role normalized to img (accessible image, not a widget tree).
  *
- * jsdom and mermaid are devDependencies loaded via dynamic import: when
- * either is unavailable (e.g. in the bundled plugin runtime) every entry
- * point fails SOFT — `{ ok: false, reason }` — and the caller falls back
- * to the built-in SVG engine with an honest note.
+ * Every entry point still fails SOFT — `{ ok: false, reason }` — if the
+ * engine cannot be loaded at all, so the caller can fall back down the
+ * render chain (docs/decisions/0002-mermaid-render-chain.md).
  */
 
 import type { BookManifest, ChangeManifest } from "@gitiviz/schema";
 import { safeUrl } from "./escape.js";
+import type { DomApi, DomElement, MermaidRenderer } from "./mermaidEngine.js";
 import {
   collectMermaidSources,
   renderChangeBook,
   type PrerenderedDiagram,
   type RenderOptions
 } from "./render.js";
+
+/**
+ * The engine module, loaded lazily by specifier so the bundler can swap in
+ * the committed sibling artifact (`./mermaid-engine.mjs`). Never import it
+ * statically — the whole point is that the heavy engine loads on demand.
+ */
+async function engineModule(): Promise<typeof import("./mermaidEngine.js")> {
+  return import("./mermaidEngine.js");
+}
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -45,131 +56,9 @@ export interface MermaidSvgOptions {
   allowedOrigins?: readonly string[];
 }
 
-// ---------------------------------------------------------------------------
-// jsdom environment (singleton — mermaid caches DOM globals at import time)
-// ---------------------------------------------------------------------------
-
-/**
- * Deterministic text metrics: generous character estimates (no randomness).
- * Slight over-estimation is intentional — dagre then reserves breathing
- * room, so real glyphs never overlap node borders or cluster titles.
- */
-const CHAR_WIDTH = 8;
-const LINE_HEIGHT = 24;
-const GEO_SKIP_TAGS = new Set(["style", "defs", "marker", "title", "desc"]);
-
-interface Box {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type DomElement = any;
-
-function textEstimate(el: DomElement): { width: number; height: number } {
-  const rows: DomElement[] = Array.from(
-    el.querySelectorAll?.(".text-outer-tspan") ?? []
-  );
-  if (rows.length > 0) {
-    let width = 0;
-    for (const row of rows) {
-      width = Math.max(width, String(row.textContent ?? "").length * CHAR_WIDTH);
-    }
-    return { width, height: rows.length * LINE_HEIGHT };
-  }
-  const lines = String(el.textContent ?? "").split("\n");
-  const width = Math.max(...lines.map((l) => l.length), 1) * CHAR_WIDTH;
-  return { width, height: lines.length * LINE_HEIGHT };
-}
-
-function parseTranslate(el: DomElement): { dx: number; dy: number } {
-  const transform = el.getAttribute?.("transform") ?? "";
-  const match = /translate\(\s*(-?[\d.]+)[ ,]\s*(-?[\d.]+)\s*\)/.exec(transform);
-  return match
-    ? { dx: Number(match[1]), dy: Number(match[2]) }
-    : { dx: 0, dy: 0 };
-}
-
-/** Recursive geometry union over rects, paths, and texts with translates. */
-function geometryBox(el: DomElement): Box | null {
-  const tag = String(el.tagName ?? "").toLowerCase();
-  if (GEO_SKIP_TAGS.has(tag)) return null;
-  if (tag === "rect") {
-    const x = Number(el.getAttribute("x") ?? 0);
-    const y = Number(el.getAttribute("y") ?? 0);
-    const w = Number(el.getAttribute("width") ?? 0);
-    const h = Number(el.getAttribute("height") ?? 0);
-    if (!Number.isFinite(x + y + w + h) || (w === 0 && h === 0)) return null;
-    return { minX: x, minY: y, maxX: x + w, maxY: y + h };
-  }
-  if (tag === "path") {
-    const d = el.getAttribute("d") ?? "";
-    let box: Box | null = null;
-    for (const [, xs, ys] of d.matchAll(/(-?\d+(?:\.\d+)?)[ ,](-?\d+(?:\.\d+)?)/g)) {
-      const x = Number(xs);
-      const y = Number(ys);
-      box = box === null
-        ? { minX: x, minY: y, maxX: x, maxY: y }
-        : {
-            minX: Math.min(box.minX, x),
-            minY: Math.min(box.minY, y),
-            maxX: Math.max(box.maxX, x),
-            maxY: Math.max(box.maxY, y)
-          };
-    }
-    return box;
-  }
-  if (tag === "text") {
-    const est = textEstimate(el);
-    return { minX: -est.width / 2, minY: 0, maxX: est.width / 2, maxY: est.height };
-  }
-  let union: Box | null = null;
-  for (const child of Array.from(el.children ?? []) as DomElement[]) {
-    const box = geometryBox(child);
-    if (box === null) continue;
-    const { dx, dy } = parseTranslate(child);
-    const shifted: Box = {
-      minX: box.minX + dx,
-      minY: box.minY + dy,
-      maxX: box.maxX + dx,
-      maxY: box.maxY + dy
-    };
-    union = union === null
-      ? shifted
-      : {
-          minX: Math.min(union.minX, shifted.minX),
-          minY: Math.min(union.minY, shifted.minY),
-          maxX: Math.max(union.maxX, shifted.maxX),
-          maxY: Math.max(union.maxY, shifted.maxY)
-        };
-  }
-  return union;
-}
-
-function estimateBBox(el: DomElement): { x: number; y: number; width: number; height: number } {
-  const tag = String(el.tagName ?? "").toLowerCase();
-  // Text measures by its rows; everything else geometry-first (rects must
-  // report their real width/height — mermaid reads node bounds off them).
-  if (tag !== "text" && tag !== "tspan") {
-    const box = geometryBox(el);
-    if (box !== null) {
-      return {
-        x: box.minX,
-        y: box.minY,
-        width: box.maxX - box.minX,
-        height: box.maxY - box.minY
-      };
-    }
-  }
-  const est = textEstimate(el);
-  return { x: 0, y: 0, width: est.width, height: est.height };
-}
-
 /**
  * The one Mermaid configuration for every render engine gitiviz uses —
- * the in-process jsdom path below AND the mermaid-cli Docker fallback the
+ * the in-process bundled engine AND the mermaid-cli Docker fallback the
  * CLI writes this object out for (as mermaid-config.json). Locked down:
  * securityLevel "strict", htmlLabels false (labels are plain SVG <text>,
  * never <foreignObject> HTML), deterministic ids, light "base" theme
@@ -205,76 +94,15 @@ export const MERMAID_RENDER_CONFIG = {
   }
 } as const;
 
-interface MermaidEnv {
-  window: DomElement;
-  mermaid: DomElement;
+/** The DOM used by the sanitizer; loaded on first use, then cached. */
+async function loadDomApi(): Promise<DomApi> {
+  return (await engineModule()).loadDom();
 }
 
-let envPromise: Promise<MermaidEnv> | null = null;
-
-async function loadEnv(): Promise<MermaidEnv> {
-  if (envPromise === null) {
-    envPromise = (async () => {
-      const { JSDOM } = await import("jsdom");
-      const dom = new JSDOM(`<!DOCTYPE html><body></body>`, {
-        url: "https://localhost/"
-      });
-      const { window } = dom as DomElement;
-
-      const g = globalThis as DomElement;
-      if (g.window === undefined) g.window = window;
-      if (g.document === undefined) g.document = window.document;
-      for (const key of [
-        "SVGElement",
-        "Element",
-        "Node",
-        "HTMLElement",
-        "DocumentFragment",
-        "MutationObserver",
-        "XMLSerializer",
-        "DOMParser",
-        "CSSStyleSheet"
-      ]) {
-        if (g[key] === undefined) g[key] = window[key];
-      }
-
-      for (const cls of [
-        window.SVGElement,
-        window.SVGGraphicsElement,
-        window.SVGTextContentElement,
-        window.SVGSVGElement
-      ]) {
-        if (cls === undefined) continue;
-        cls.prototype.getBBox = function (this: DomElement) {
-          return estimateBBox(this);
-        };
-        cls.prototype.getComputedTextLength = function (this: DomElement) {
-          return String(this.textContent ?? "").length * CHAR_WIDTH;
-        };
-      }
-      window.Element.prototype.getBoundingClientRect = function (this: DomElement) {
-        const est = estimateBBox(this);
-        return {
-          x: 0,
-          y: 0,
-          top: 0,
-          left: 0,
-          width: est.width,
-          height: est.height,
-          right: est.width,
-          bottom: est.height,
-          toJSON: () => ({})
-        };
-      };
-
-      const mermaid = (await import("mermaid")).default as DomElement;
-      mermaid.initialize({ ...MERMAID_RENDER_CONFIG });
-      return { window, mermaid };
-    })();
-  }
-  return envPromise;
+/** The Mermaid instance; loaded on first use, then cached by the engine. */
+async function loadRenderer(): Promise<MermaidRenderer> {
+  return (await engineModule()).loadMermaidRenderer({ ...MERMAID_RENDER_CONFIG });
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
 // SVG sanitizer (defense in depth over mermaid's own strict mode)
@@ -319,27 +147,25 @@ function hrefAllowed(value: string, allowedOrigins: readonly string[]): boolean 
 /**
  * Sanitize a (mermaid-produced or hostile) SVG string. Returns the cleaned
  * `<svg>` element markup, or null when the input has no svg root. Pure with
- * respect to its input; async only because jsdom loads lazily.
+ * respect to its input; async only because the DOM loads lazily.
  */
 export async function sanitizeMermaidSvg(
   svg: string,
   options: MermaidSvgOptions = {}
 ): Promise<string | null> {
   const allowedOrigins = options.allowedOrigins ?? [];
-  const { JSDOM } = await import("jsdom");
-  const dom = new JSDOM(`<!DOCTYPE html><body>${svg}</body>`, {
-    url: "https://localhost/"
-  });
-  const root = dom.window.document.body.querySelector("svg");
+  const dom = await loadDomApi();
+  const document = dom.parseDocument(`<!DOCTYPE html><body>${svg}</body>`);
+  const root = document.body.querySelector("svg");
   if (root === null) return null;
 
   // Element pass (snapshot first — we mutate as we go).
-  for (const el of Array.from(root.querySelectorAll("*"))) {
+  for (const el of Array.from(root.querySelectorAll("*")) as DomElement[]) {
     if (FORBIDDEN_SVG_TAGS.has(el.tagName.toLowerCase())) {
       el.remove();
       continue;
     }
-    for (const attr of Array.from(el.attributes)) {
+    for (const attr of Array.from(el.attributes) as DomElement[]) {
       const name = attr.name.toLowerCase();
       if (name.startsWith("on")) {
         el.removeAttribute(attr.name);
@@ -356,7 +182,7 @@ export async function sanitizeMermaidSvg(
     }
   }
   // Root attribute pass.
-  for (const attr of Array.from(root.attributes)) {
+  for (const attr of Array.from(root.attributes) as DomElement[]) {
     const name = attr.name.toLowerCase();
     if (name.startsWith("on")) root.removeAttribute(attr.name);
   }
@@ -389,9 +215,9 @@ export async function renderMermaidDiagram(
   if (!SAFE_DOM_ID.test(domId)) {
     return { ok: false, reason: `unsafe diagram dom id: ${JSON.stringify(domId)}` };
   }
-  let env: MermaidEnv;
+  let renderer: MermaidRenderer;
   try {
-    env = await loadEnv();
+    renderer = await loadRenderer();
   } catch (error) {
     return {
       ok: false,
@@ -399,7 +225,7 @@ export async function renderMermaidDiagram(
     };
   }
   try {
-    const { svg } = await env.mermaid.render(domId, text);
+    const svg = await renderer.render(domId, text);
     const clean = await sanitizeMermaidSvg(svg, options);
     if (clean === null) {
       return { ok: false, reason: "mermaid produced no svg root" };

@@ -2,11 +2,13 @@
  * Mermaid prerender chain — how compiled diagram sources become sanitized
  * SVG in every runtime the CLI ships to (docs/decisions/0002-mermaid-render-chain.md):
  *
- *   (a) local toolchain — mermaid + jsdom importable (the dev/Docker
- *       toolchain, where node_modules are present): render in-process via
- *       the renderer's deterministic pipeline.
- *   (b) mermaid-cli via Docker — the committed dependency-free bundle
- *       cannot ship jsdom/mermaid, so:
+ *   (a) the bundled Mermaid engine — real Mermaid and its DOM, shipped
+ *       inside the plugin (plugins/claude-code/scripts/mermaid-engine.mjs),
+ *       rendered in-process by the renderer's deterministic pipeline. This
+ *       is the DEFAULT and it works everywhere: offline, no Docker, no
+ *       install, nothing to download. The links below exist only for the
+ *       case where even that cannot load.
+ *   (b) mermaid-cli via Docker — a secondary route:
  *       (b1) pick up fresh `<out>/mermaid/<id>.svg` files produced by an
  *            earlier mermaid-cli pass (the plugin launcher's Docker
  *            fallback runs that pass host-side between two CLI runs);
@@ -15,10 +17,11 @@
  *            image (a markdown batch — one container, one headless-browser
  *            launch, regardless of diagram count), falling back to
  *            per-diagram runs only if the batch fails.
- *       Both apply the SAME sanitation policy as (a) — via jsdom when
- *       importable, else the dependency-free text sanitizer.
- *   (c) nothing available — return no SVGs; the renderer falls back to the
- *       built-in engine with its honest caption.
+ *       Both apply the SAME sanitation policy as (a) — via the bundled DOM
+ *       when it loads, else the dependency-free text sanitizer.
+ *   (c) nothing available — a genuine last resort users should never see:
+ *       return no SVGs; the renderer falls back to the built-in engine with
+ *       its honest caption.
  *
  * Sources are always written to `<out>/mermaid/<id>.mmd` (plus the shared
  * mermaid-config.json) so the launcher's host-side mermaid-cli pass has
@@ -177,7 +180,7 @@ export async function prerenderMermaidDiagrams(
     }
   }
 
-  // (a) local mermaid + jsdom, in-process and deterministic.
+  // (a) the bundled Mermaid engine, in-process and deterministic.
   let localAvailable = true;
   for (const { id, text } of sources) {
     if (!SAFE_ID.test(id)) continue;
@@ -197,7 +200,7 @@ export async function prerenderMermaidDiagrams(
   if (localAvailable) {
     if (svgs.size > 0) {
       notes.unshift(
-        `mermaid: ${svgs.size} diagram(s) rendered with the local Mermaid toolchain`
+        `mermaid: ${svgs.size} diagram(s) rendered with the bundled Mermaid engine`
       );
     }
     return { svgs, notes };
@@ -205,7 +208,7 @@ export async function prerenderMermaidDiagrams(
   svgs.clear();
   notes.length = 0;
   notes.push(
-    "mermaid: local mermaid/jsdom not installed — trying prerendered SVGs, then Docker"
+    "mermaid: bundled Mermaid engine could not load — trying prerendered SVGs, then Docker"
   );
 
   // (b1) fresh SVGs already on disk (an earlier mermaid-cli pass). A batched
