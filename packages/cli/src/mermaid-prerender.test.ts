@@ -10,10 +10,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { MermaidRenderResult, MermaidSource } from "@gitiviz/renderer";
 import {
+  MERMAID_BATCH_FILE,
+  MERMAID_BATCH_OUT_STEM,
   MERMAID_CLI_IMAGE,
   MERMAID_CONFIG_FILE,
   MERMAID_DIR,
   prerenderMermaidDiagrams,
+  renameMermaidSvgId,
   type ExecFn
 } from "./mermaid-prerender.js";
 
@@ -108,25 +111,108 @@ describe("prerenderMermaidDiagrams", () => {
     expect(await readFile(join(dir, "architecture.mmd"), "utf8")).toBe(changed[0]!.text);
   });
 
-  it("chain (b2): renders via the mermaid-cli image and sanitizes its output", async () => {
+  /**
+   * Stand-in for a successful batched mermaid-cli run: reads the batch
+   * markdown the CLI wrote, and writes one `<stem>-N.svg` per mermaid fence
+   * (mmdc's naming), each with mmdc's default constant svg id.
+   */
+  function batchExec(dir: string, calls: string[][]): ExecFn {
+    return async (command, args) => {
+      calls.push([command, ...args]);
+      if (args[0] === "version") return { stdout: "29.0.0", stderr: "" };
+      const input = args[args.indexOf("-i") + 1]!;
+      expect(input).toBe(`/data/${MERMAID_BATCH_FILE}`);
+      const batch = await readFile(join(dir, MERMAID_BATCH_FILE), "utf8");
+      const fences = batch.split("```mermaid").length - 1;
+      for (let n = 1; n <= fences; n++) {
+        await writeFile(
+          join(dir, `${MERMAID_BATCH_OUT_STEM}-${n}.svg`),
+          `<svg id="my-svg" aria-roledescription="flowchart-v2" onload="alert(1)">` +
+            `<style>#my-svg{font-family:sans-serif;}#my-svg .node{fill:#fff;}</style>` +
+            `<foreignObject><div>x</div></foreignObject>` +
+            `<a href="https://github.com/acme/demo/blob/abc/x.ts"><text>ok</text></a>` +
+            `<rect fill="url(#my-svg-gradient)"/>` +
+            `<text>node label ${n}</text></svg>`,
+          "utf8"
+        );
+      }
+      return { stdout: "", stderr: "" };
+    };
+  }
+
+  it("chain (b2): renders every missing diagram in ONE mermaid-cli container and sanitizes", async () => {
+    const outDir = await newOutDir();
+    const dir = join(outDir, MERMAID_DIR);
+    const calls: string[][] = [];
+    const { svgs, notes } = await prerenderMermaidDiagrams(
+      SOURCES,
+      { outDir },
+      { localRender: noLocal, exec: batchExec(dir, calls) }
+    );
+    expect(svgs.size).toBe(2);
+    const svg = svgs.get("u0")!.svg;
+    expect(svg).not.toContain("onload");
+    expect(svg.toLowerCase()).not.toContain("foreignobject");
+    expect(svg).not.toContain("aria-roledescription");
+    expect(svg).toContain('role="img"');
+    expect(svg).toContain("node label 2");
+    // Each slot's svg id is renamed from mmdc's constant to the unique
+    // per-slot DOM id (scoped styles and url(#) refs follow).
+    expect(svg).toContain('id="gitiviz-u0"');
+    expect(svg).toContain("#gitiviz-u0 .node");
+    expect(svg).toContain("url(#gitiviz-u0-gradient)");
+    expect(svg).not.toContain("my-svg");
+    expect(svgs.get("architecture")!.svg).toContain('id="gitiviz-architecture"');
+    expect(notes.join("\n")).toContain(MERMAID_CLI_IMAGE);
+    // Bounded docker use: one probe + ONE batched run — never one per diagram.
+    expect(calls).toHaveLength(2);
+    const run = calls[1]!;
+    expect(run[1]).toBe("run");
+    expect(run).toContain(MERMAID_CLI_IMAGE);
+    expect(run).toContain(`/data/${MERMAID_CONFIG_FILE}`);
+    // Per-slot svgs persist for later fresh pickups; batch files are gone.
+    expect(await readFile(join(dir, "u0.svg"), "utf8")).toContain('id="gitiviz-u0"');
+    await expect(readFile(join(dir, MERMAID_BATCH_FILE), "utf8")).rejects.toThrow();
+    await expect(
+      readFile(join(dir, `${MERMAID_BATCH_OUT_STEM}-1.svg`), "utf8")
+    ).rejects.toThrow();
+  });
+
+  it("REGRESSION: docker exec calls stay bounded (2) no matter how many diagrams", async () => {
+    // The 50-minute multi-commit blowup was one docker+Chromium spawn per
+    // diagram (diagram count grows with the commit range). The container
+    // spawn is the expensive primitive: assert its call count is constant.
+    const outDir = await newOutDir();
+    const dir = join(outDir, MERMAID_DIR);
+    const many: MermaidSource[] = Array.from({ length: 24 }, (_, i) => ({
+      id: `u${i}`,
+      text: `flowchart TD\n\nn0["Unit ${i}"]\n`
+    }));
+    const calls: string[][] = [];
+    const { svgs } = await prerenderMermaidDiagrams(
+      many,
+      { outDir },
+      { localRender: noLocal, exec: batchExec(dir, calls) }
+    );
+    expect(svgs.size).toBe(24);
+    expect(calls).toHaveLength(2); // 1 docker probe + 1 batched render — bounded
+  });
+
+  it("chain (b2): falls back to per-diagram renders when the batch run fails", async () => {
     const outDir = await newOutDir();
     const dir = join(outDir, MERMAID_DIR);
     const calls: string[][] = [];
     const exec: ExecFn = async (command, args) => {
       calls.push([command, ...args]);
       if (args[0] === "version") return { stdout: "29.0.0", stderr: "" };
-      // Stand-in for mermaid-cli: honour -o by writing a hostile-ish SVG.
+      const input = args[args.indexOf("-i") + 1]!;
+      if (input === `/data/${MERMAID_BATCH_FILE}`) {
+        throw new Error("one fence failed to parse");
+      }
+      // Per-diagram call: honour -o and -I like the real mmdc.
       const out = args[args.indexOf("-o") + 1]!.replace("/data", dir);
       const id = args[args.indexOf("-I") + 1]!;
-      await writeFile(
-        out,
-        `<svg id="${id}" aria-roledescription="flowchart-v2" onload="alert(1)">` +
-          `<foreignObject><div>x</div></foreignObject>` +
-          `<a href="https://github.com/acme/demo/blob/abc/x.ts"><text>ok</text></a>` +
-          `<a href="https://evil.example/y"><text>keep? no—https passes</text></a>` +
-          `<text>node label</text></svg>`,
-        "utf8"
-      );
+      await writeFile(out, `<svg id="${id}"><text>ok</text></svg>`, "utf8");
       return { stdout: "", stderr: "" };
     };
     const { svgs, notes } = await prerenderMermaidDiagrams(
@@ -135,26 +221,33 @@ describe("prerenderMermaidDiagrams", () => {
       { localRender: noLocal, exec }
     );
     expect(svgs.size).toBe(2);
-    const svg = svgs.get("u0")!.svg;
-    expect(svg).not.toContain("onload");
-    expect(svg.toLowerCase()).not.toContain("foreignobject");
-    expect(svg).not.toContain("aria-roledescription");
-    expect(svg).toContain('role="img"');
-    expect(svg).toContain("node label");
-    expect(notes.join("\n")).toContain(MERMAID_CLI_IMAGE);
-    // The docker invocations: one probe + one run per diagram, correct image
-    // and per-slot flags, id passed as the DOM id.
-    const runs = calls.filter((c) => c[1] === "run");
-    expect(runs).toHaveLength(2);
-    for (const run of runs) {
-      expect(run).toContain(MERMAID_CLI_IMAGE);
-      expect(run).toContain("-c");
-      expect(run).toContain(`/data/${MERMAID_CONFIG_FILE}`);
-    }
-    expect(runs.map((r) => r[r.indexOf("-I") + 1])).toEqual([
+    expect(svgs.get("architecture")!.svg).toContain('id="gitiviz-architecture"');
+    const perDiagram = calls.filter((c) => c.includes("-I"));
+    expect(perDiagram.map((r) => r[r.indexOf("-I") + 1])).toEqual([
       "gitiviz-architecture",
       "gitiviz-u0"
     ]);
+    expect(notes.join("\n")).toContain("per-diagram");
+  });
+
+  it("chain (b1): renames mmdc's constant svg id to the per-slot DOM id on pickup", async () => {
+    const outDir = await newOutDir();
+    const dir = join(outDir, MERMAID_DIR);
+    await prerenderMermaidDiagrams(SOURCES, { outDir }, { localRender: noLocal, exec: noDocker });
+    // A batched launcher pass leaves mmdc's default id on disk.
+    await writeFile(
+      join(dir, "architecture.svg"),
+      `<svg id="my-svg"><style>#my-svg{fill:red;}</style><text>App</text></svg>`,
+      "utf8"
+    );
+    const { svgs } = await prerenderMermaidDiagrams(
+      SOURCES,
+      { outDir },
+      { localRender: noLocal, exec: noDocker }
+    );
+    const svg = svgs.get("architecture")!.svg;
+    expect(svg).toContain('id="gitiviz-architecture"');
+    expect(svg).toContain("#gitiviz-architecture{fill:red;}");
   });
 
   it("chain (c): no local toolchain, no docker — empty result, honest notes", async () => {
@@ -186,6 +279,41 @@ describe("prerenderMermaidDiagrams", () => {
     const svg = svgs.get("u0")!.svg;
     expect(svg).toContain('href="http://git.internal/x"');
     expect(svg).not.toContain("other.host");
+  });
+
+  describe("renameMermaidSvgId", () => {
+    it("renames the root id, id prefixes, url(#) refs, href fragments, and style selectors", () => {
+      const svg =
+        `<svg id="my-svg"><style>#my-svg .edge{stroke:#000;}#my-svg{color:red;}</style>` +
+        `<marker id="my-svg_flowchart-v2-pointEnd"/><rect fill="url(#my-svg-gradient)"/>` +
+        `<path marker-end="url(#my-svg_flowchart-v2-pointEnd)"/>` +
+        `<a href="#my-svg-node-1"><text>go</text></a></svg>`;
+      const out = renameMermaidSvgId(svg, "gitiviz-u3");
+      expect(out).toContain('id="gitiviz-u3"');
+      expect(out).toContain('id="gitiviz-u3_flowchart-v2-pointEnd"');
+      expect(out).toContain('fill="url(#gitiviz-u3-gradient)"');
+      expect(out).toContain('marker-end="url(#gitiviz-u3_flowchart-v2-pointEnd)"');
+      expect(out).toContain('href="#gitiviz-u3-node-1"');
+      expect(out).toContain("#gitiviz-u3 .edge");
+      expect(out).toContain("#gitiviz-u3{color:red;}");
+      expect(out).not.toContain("my-svg");
+    });
+
+    it("leaves visible label text alone, even when it mentions the old id", () => {
+      const svg =
+        `<svg id="my-svg"><style>#my-svg{color:red;}</style>` +
+        `<text>fix #my-svg and my-svg quirks</text></svg>`;
+      const out = renameMermaidSvgId(svg, "gitiviz-u0");
+      expect(out).toContain("<text>fix #my-svg and my-svg quirks</text>");
+      expect(out).toContain('id="gitiviz-u0"');
+    });
+
+    it("is a no-op when the id already matches or no root id exists", () => {
+      const already = `<svg id="gitiviz-u0"><text>x</text></svg>`;
+      expect(renameMermaidSvgId(already, "gitiviz-u0")).toBe(already);
+      const bare = `<svg><text>x</text></svg>`;
+      expect(renameMermaidSvgId(bare, "gitiviz-u0")).toBe(bare);
+    });
   });
 
   it("skips ids that are not filename/DOM-id safe", async () => {

@@ -10239,9 +10239,21 @@ import { promisify } from "node:util";
 var MERMAID_DIR = "mermaid";
 var MERMAID_CONFIG_FILE = "mermaid-config.json";
 var MERMAID_CLI_IMAGE = "minlag/mermaid-cli";
+var MERMAID_BATCH_FILE = "_batch.md";
+var MERMAID_BATCH_OUT_STEM = "_batch-out";
 var SAFE_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
 var execFileAsync = promisify(execFile2);
 var defaultExec = async (command, args) => execFileAsync(command, args, { maxBuffer: 16 * 1024 * 1024 });
+function renameMermaidSvgId(svg, toId) {
+  const root = /<svg\b[^>]*?\bid="([A-Za-z][A-Za-z0-9_-]*)"/.exec(svg);
+  if (root === null) return svg;
+  const from = root[1];
+  if (from === toId || !SAFE_ID.test(toId)) return svg;
+  return svg.replace(
+    /<style\b[^>]*>[\s\S]*?<\/style>/g,
+    (block) => block.replaceAll(`#${from}`, `#${toId}`)
+  ).replaceAll(`id="${from}`, `id="${toId}`).replaceAll(`url(#${from}`, `url(#${toId}`).replaceAll(`href="#${from}`, `href="#${toId}`);
+}
 async function sanitizeSvg(svg, allowedOrigins) {
   try {
     return await sanitizeMermaidSvg(svg, { allowedOrigins });
@@ -10317,7 +10329,8 @@ async function prerenderMermaidDiagrams(sources, options, deps = {}) {
   for (const { id, text } of sources) {
     if (!freshOnDisk.has(id)) continue;
     const raw = await readFile(join(dir, `${id}.svg`), "utf8").catch(() => null);
-    const clean = raw === null ? null : await sanitizeSvg(raw, allowedOrigins);
+    const renamed = raw === null ? null : renameMermaidSvgId(raw, `gitiviz-${id}`);
+    const clean = renamed === null ? null : await sanitizeSvg(renamed, allowedOrigins);
     if (clean !== null) {
       svgs.set(id, { text, svg: clean });
       pickedUp += 1;
@@ -10343,36 +10356,86 @@ async function prerenderMermaidDiagrams(sources, options, deps = {}) {
       return { svgs, notes };
     }
     let rendered = 0;
-    for (const { id, text } of missing) {
-      try {
-        await exec("docker", [
-          "run",
-          "--rm",
-          "-v",
-          `${dir}:/data`,
-          MERMAID_CLI_IMAGE,
-          "-q",
-          "-i",
-          `/data/${id}.mmd`,
-          "-o",
-          `/data/${id}.svg`,
-          "-c",
-          `/data/${MERMAID_CONFIG_FILE}`,
-          "-I",
-          `gitiviz-${id}`,
-          "-b",
-          "transparent"
-        ]);
-        const raw = await readFile(join(dir, `${id}.svg`), "utf8");
-        const clean = await sanitizeSvg(raw, allowedOrigins);
-        if (clean !== null) {
+    const batchText = missing.map(({ text }) => `\`\`\`mermaid
+${text}${text.endsWith("\n") ? "" : "\n"}\`\`\`
+`).join("\n");
+    await writeFile(join(dir, MERMAID_BATCH_FILE), batchText, "utf8");
+    let batchOk = true;
+    try {
+      await exec("docker", [
+        "run",
+        "--rm",
+        "-v",
+        `${dir}:/data`,
+        MERMAID_CLI_IMAGE,
+        "-q",
+        "-i",
+        `/data/${MERMAID_BATCH_FILE}`,
+        "-o",
+        `/data/${MERMAID_BATCH_OUT_STEM}.md`,
+        "-c",
+        `/data/${MERMAID_CONFIG_FILE}`,
+        "-b",
+        "transparent"
+      ]);
+    } catch (error) {
+      batchOk = false;
+      notes.push(
+        `mermaid: batched mermaid-cli run failed (${error instanceof Error ? error.message : String(error)}) \u2014 retrying per-diagram`
+      );
+    }
+    if (batchOk) {
+      for (const [index, { id, text }] of missing.entries()) {
+        const outPath = join(dir, `${MERMAID_BATCH_OUT_STEM}-${index + 1}.svg`);
+        const raw = await readFile(outPath, "utf8").catch(() => null);
+        const renamed = raw === null ? null : renameMermaidSvgId(raw, `gitiviz-${id}`);
+        const clean = renamed === null ? null : await sanitizeSvg(renamed, allowedOrigins);
+        if (renamed !== null && clean !== null) {
+          await writeFile(join(dir, `${id}.svg`), renamed, "utf8");
           svgs.set(id, { text, svg: clean });
           rendered += 1;
+        } else {
+          notes.push(`mermaid: mermaid-cli produced no svg for "${id}" \u2014 built-in fallback`);
         }
-      } catch (error) {
-        notes.push(
-          `mermaid: mermaid-cli failed for "${id}" (${error instanceof Error ? error.message : String(error)}) \u2014 built-in fallback`
-        );
+      }
+      const junk = missing.map(
+        (_, index) => join(dir, `${MERMAID_BATCH_OUT_STEM}-${index + 1}.svg`)
+      );
+      junk.push(join(dir, MERMAID_BATCH_FILE), join(dir, `${MERMAID_BATCH_OUT_STEM}.md`));
+      for (const path of junk) await rm(path, { force: true });
+    } else {
+      await rm(join(dir, MERMAID_BATCH_FILE), { force: true });
+      for (const { id, text } of missing) {
+        try {
+          await exec("docker", [
+            "run",
+            "--rm",
+            "-v",
+            `${dir}:/data`,
+            MERMAID_CLI_IMAGE,
+            "-q",
+            "-i",
+            `/data/${id}.mmd`,
+            "-o",
+            `/data/${id}.svg`,
+            "-c",
+            `/data/${MERMAID_CONFIG_FILE}`,
+            "-I",
+            `gitiviz-${id}`,
+            "-b",
+            "transparent"
+          ]);
+          const raw = await readFile(join(dir, `${id}.svg`), "utf8");
+          const clean = await sanitizeSvg(raw, allowedOrigins);
+          if (clean !== null) {
+            svgs.set(id, { text, svg: clean });
+            rendered += 1;
+          }
+        } catch (error) {
+          notes.push(
+            `mermaid: mermaid-cli failed for "${id}" (${error instanceof Error ? error.message : String(error)}) \u2014 built-in fallback`
+          );
+        }
       }
     }
     if (rendered > 0) {

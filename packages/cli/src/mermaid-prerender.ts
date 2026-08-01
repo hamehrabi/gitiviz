@@ -10,8 +10,11 @@
  *       (b1) pick up fresh `<out>/mermaid/<id>.svg` files produced by an
  *            earlier mermaid-cli pass (the plugin launcher's Docker
  *            fallback runs that pass host-side between two CLI runs);
- *       (b2) with Docker reachable from this process, render each missing
- *            diagram through the official minlag/mermaid-cli image.
+ *       (b2) with Docker reachable from this process, render ALL missing
+ *            diagrams through ONE run of the official minlag/mermaid-cli
+ *            image (a markdown batch — one container, one headless-browser
+ *            launch, regardless of diagram count), falling back to
+ *            per-diagram runs only if the batch fails.
  *       Both apply the SAME sanitation policy as (a) — via jsdom when
  *       importable, else the dependency-free text sanitizer.
  *   (c) nothing available — return no SVGs; the renderer falls back to the
@@ -44,6 +47,18 @@ export const MERMAID_CONFIG_FILE = "mermaid-config.json";
 
 /** The official mermaid-cli image used for chain link (b2). */
 export const MERMAID_CLI_IMAGE = "minlag/mermaid-cli";
+
+/**
+ * Batch exchange files for the single-container mermaid-cli run: every
+ * missing diagram goes into ONE markdown file (one fence per diagram), so
+ * ONE `docker run` — one headless-browser launch — renders them all. mmdc
+ * names the outputs `<out stem>-<n>.svg` in fence order. The leading "_"
+ * makes collision with slot ids impossible (SAFE_ID requires a letter
+ * first). The launcher (run.sh) uses the same file names for its host-side
+ * pass.
+ */
+export const MERMAID_BATCH_FILE = "_batch.md";
+export const MERMAID_BATCH_OUT_STEM = "_batch-out";
 
 /** Diagram slot ids double as file names and DOM ids — same shape as both. */
 const SAFE_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
@@ -82,6 +97,29 @@ export interface PrerenderOutcome {
   svgs: Map<string, PrerenderedDiagram>;
   /** Honest, printable notes about which chain link did the work. */
   notes: string[];
+}
+
+/**
+ * Rename a mermaid-produced SVG's root id (mmdc's batch mode always emits
+ * its constant default id) to the unique per-slot DOM id, following every
+ * structural reference: `id="…"` prefixes, `url(#…)` paint/marker refs,
+ * `href="#…"` fragments, and the `#id` selectors of embedded <style>
+ * blocks. Visible label text is never touched — replacements are anchored
+ * to those markup contexts only. No-op when there is no root id or it
+ * already matches.
+ */
+export function renameMermaidSvgId(svg: string, toId: string): string {
+  const root = /<svg\b[^>]*?\bid="([A-Za-z][A-Za-z0-9_-]*)"/.exec(svg);
+  if (root === null) return svg;
+  const from = root[1]!;
+  if (from === toId || !SAFE_ID.test(toId)) return svg;
+  return svg
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/g, (block) =>
+      block.replaceAll(`#${from}`, `#${toId}`)
+    )
+    .replaceAll(`id="${from}`, `id="${toId}`)
+    .replaceAll(`url(#${from}`, `url(#${toId}`)
+    .replaceAll(`href="#${from}`, `href="#${toId}`);
 }
 
 /** Sanitize with the jsdom sanitizer when importable, else the text one. */
@@ -170,12 +208,14 @@ export async function prerenderMermaidDiagrams(
     "mermaid: local mermaid/jsdom not installed — trying prerendered SVGs, then Docker"
   );
 
-  // (b1) fresh SVGs already on disk (an earlier mermaid-cli pass).
+  // (b1) fresh SVGs already on disk (an earlier mermaid-cli pass). A batched
+  // pass leaves mmdc's constant svg id — rename to the per-slot DOM id.
   let pickedUp = 0;
   for (const { id, text } of sources) {
     if (!freshOnDisk.has(id)) continue;
     const raw = await readFile(join(dir, `${id}.svg`), "utf8").catch(() => null);
-    const clean = raw === null ? null : await sanitizeSvg(raw, allowedOrigins);
+    const renamed = raw === null ? null : renameMermaidSvgId(raw, `gitiviz-${id}`);
+    const clean = renamed === null ? null : await sanitizeSvg(renamed, allowedOrigins);
     if (clean !== null) {
       svgs.set(id, { text, svg: clean });
       pickedUp += 1;
@@ -203,37 +243,99 @@ export async function prerenderMermaidDiagrams(
       return { svgs, notes };
     }
     let rendered = 0;
-    for (const { id, text } of missing) {
-      try {
-        await exec("docker", [
-          "run",
-          "--rm",
-          "-v",
-          `${dir}:/data`,
-          MERMAID_CLI_IMAGE,
-          "-q",
-          "-i",
-          `/data/${id}.mmd`,
-          "-o",
-          `/data/${id}.svg`,
-          "-c",
-          `/data/${MERMAID_CONFIG_FILE}`,
-          "-I",
-          `gitiviz-${id}`,
-          "-b",
-          "transparent"
-        ]);
-        const raw = await readFile(join(dir, `${id}.svg`), "utf8");
-        const clean = await sanitizeSvg(raw, allowedOrigins);
-        if (clean !== null) {
+
+    // One markdown fence per missing diagram → ONE docker run — one
+    // container, one headless-browser launch — renders them all. The
+    // per-diagram spawn was the multi-commit perf blowup: diagram count
+    // grows with the commit range, and each container costs seconds to
+    // minutes depending on the host.
+    const batchText = missing
+      .map(({ text }) => `\`\`\`mermaid\n${text}${text.endsWith("\n") ? "" : "\n"}\`\`\`\n`)
+      .join("\n");
+    await writeFile(join(dir, MERMAID_BATCH_FILE), batchText, "utf8");
+    let batchOk = true;
+    try {
+      await exec("docker", [
+        "run",
+        "--rm",
+        "-v",
+        `${dir}:/data`,
+        MERMAID_CLI_IMAGE,
+        "-q",
+        "-i",
+        `/data/${MERMAID_BATCH_FILE}`,
+        "-o",
+        `/data/${MERMAID_BATCH_OUT_STEM}.md`,
+        "-c",
+        `/data/${MERMAID_CONFIG_FILE}`,
+        "-b",
+        "transparent"
+      ]);
+    } catch (error) {
+      batchOk = false;
+      notes.push(
+        `mermaid: batched mermaid-cli run failed ` +
+          `(${error instanceof Error ? error.message : String(error)}) — ` +
+          `retrying per-diagram`
+      );
+    }
+    if (batchOk) {
+      for (const [index, { id, text }] of missing.entries()) {
+        const outPath = join(dir, `${MERMAID_BATCH_OUT_STEM}-${index + 1}.svg`);
+        const raw = await readFile(outPath, "utf8").catch(() => null);
+        const renamed = raw === null ? null : renameMermaidSvgId(raw, `gitiviz-${id}`);
+        const clean = renamed === null ? null : await sanitizeSvg(renamed, allowedOrigins);
+        if (renamed !== null && clean !== null) {
+          // Persist per-slot so the next run's (b1) freshness pass skips it.
+          await writeFile(join(dir, `${id}.svg`), renamed, "utf8");
           svgs.set(id, { text, svg: clean });
           rendered += 1;
+        } else {
+          notes.push(`mermaid: mermaid-cli produced no svg for "${id}" — built-in fallback`);
         }
-      } catch (error) {
-        notes.push(
-          `mermaid: mermaid-cli failed for "${id}" ` +
-            `(${error instanceof Error ? error.message : String(error)}) — built-in fallback`
-        );
+      }
+      const junk = missing.map(
+        (_, index) => join(dir, `${MERMAID_BATCH_OUT_STEM}-${index + 1}.svg`)
+      );
+      junk.push(join(dir, MERMAID_BATCH_FILE), join(dir, `${MERMAID_BATCH_OUT_STEM}.md`));
+      for (const path of junk) await rm(path, { force: true });
+    } else {
+      // A diagram that breaks the whole batch (mmdc stops at the first bad
+      // fence) must not take the others down: render one container per
+      // diagram, exactly as before the batching.
+      await rm(join(dir, MERMAID_BATCH_FILE), { force: true });
+      for (const { id, text } of missing) {
+        try {
+          await exec("docker", [
+            "run",
+            "--rm",
+            "-v",
+            `${dir}:/data`,
+            MERMAID_CLI_IMAGE,
+            "-q",
+            "-i",
+            `/data/${id}.mmd`,
+            "-o",
+            `/data/${id}.svg`,
+            "-c",
+            `/data/${MERMAID_CONFIG_FILE}`,
+            "-I",
+            `gitiviz-${id}`,
+            "-b",
+            "transparent"
+          ]);
+          const raw = await readFile(join(dir, `${id}.svg`), "utf8");
+          const clean = await sanitizeSvg(raw, allowedOrigins);
+          if (clean !== null) {
+            svgs.set(id, { text, svg: clean });
+            rendered += 1;
+          }
+        } catch (error) {
+          notes.push(
+            `mermaid: mermaid-cli failed for "${id}" ` +
+              `(${error instanceof Error ? error.message : String(error)}) — built-in fallback`
+          );
+        }
       }
     }
     if (rendered > 0) {

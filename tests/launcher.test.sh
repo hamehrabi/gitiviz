@@ -82,10 +82,26 @@ else
 fi
 # The repo is mounted at /repo inside the container; the launcher must pass
 # the host directory's real name so the book is not titled "repo".
-if grep -q "<h1>fixture</h1>" "$HTML"; then
+if grep -q 'class="sb-wordmark">fixture<' "$HTML"; then
   pass "docker fallback titles the book after the host directory, not /repo"
 else
-  fail "expected <h1>fixture</h1> in $HTML, got: $(grep -o '<h1>[^<]*</h1>' "$HTML" || echo none)"
+  fail "expected the sidebar wordmark 'fixture' in $HTML, got: $(grep -o 'class="sb-wordmark">[^<]*<' "$HTML" || echo none)"
+fi
+
+# Fresh diagrams are not re-rendered: a second identical run must leave the
+# mermaid SVGs untouched (mermaid-cli containers are the expensive step).
+SVG_FIRST="$(ls "$FIXTURE/.gitiviz/mermaid/"*.svg 2>/dev/null | head -1)"
+if [[ -n "$SVG_FIRST" ]]; then
+  # Backdate the SVG; anything that rewrites it bumps the mtime past REF.
+  REF="$WORK/mtime-ref"
+  touch -t 202001010000 "$SVG_FIRST"
+  touch -t 202101010000 "$REF"
+  if (cd "$FIXTURE" && PATH="/usr/bin:/bin:$DOCKER_DIR" bash "$RUN_SH" compare main feature/x) \
+    && [[ -z "$(find "$SVG_FIRST" -newer "$REF" 2>/dev/null)" ]]; then
+    pass "second run skips mermaid re-render (fresh SVGs untouched)"
+  else
+    fail "second run re-rendered fresh mermaid SVGs (or failed)"
+  fi
 fi
 
 # --- 3. neither node nor docker: actionable error, exit 1 ---------------

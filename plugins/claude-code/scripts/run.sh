@@ -35,21 +35,60 @@ renders_book() {
   esac
 }
 
-# Host-side chain link (b): render every compiled .mmd source through the
-# official mermaid-cli image with the CLI-written shared config. Per-file
-# failures are tolerated — those slots keep the honest built-in fallback,
-# and the CLI re-sanitizes every SVG it picks up.
+# Host-side chain link (b): render the compiled .mmd sources through the
+# official mermaid-cli image with the CLI-written shared config. ONE
+# container renders every pending diagram (a markdown batch — one
+# headless-browser launch regardless of diagram count; per-diagram
+# containers made multi-commit ranges take minutes to hours). Sources whose
+# .svg already exists are fresh — the CLI deletes stale SVGs before this
+# pass — and are skipped, so repeat runs render nothing. The CLI renames
+# each SVG's id to its slot and re-sanitizes on pickup.
+# Returns 0 when new SVGs were produced (a second CLI pass should pick
+# them up), 1 when there was nothing to render or the batch failed.
 render_mermaid_cli() {
-  [ -d "$MERMAID_DIR" ] || return 0
-  local mmd name
+  [ -d "$MERMAID_DIR" ] || return 1
+  local batch="$MERMAID_DIR/_batch.md" mmd name names=() i rendered=0
   for mmd in "$MERMAID_DIR"/*.mmd; do
-    [ -e "$mmd" ] || return 0   # no sources — nothing to do
+    [ -e "$mmd" ] || return 1   # no sources — nothing to do
     name="$(basename "$mmd" .mmd)"
-    docker run --rm -v "$MERMAID_DIR":/data minlag/mermaid-cli \
-      -q -i "/data/$name.mmd" -o "/data/$name.svg" \
-      -c /data/mermaid-config.json -I "gitiviz-$name" -b transparent \
-      || echo "gitiviz: mermaid-cli failed for $name — that diagram keeps the built-in fallback" >&2
+    case "$name" in _*) continue ;; esac
+    [ -s "$MERMAID_DIR/$name.svg" ] && continue   # fresh from an earlier pass
+    names+=("$name")
   done
+  [ "${#names[@]}" -eq 0 ] && return 1
+  : > "$batch"
+  for name in "${names[@]}"; do
+    { printf '```mermaid\n'; cat "$MERMAID_DIR/$name.mmd"; printf '\n```\n\n'; } >> "$batch"
+  done
+  local batch_ok=1
+  docker run --rm -v "$MERMAID_DIR":/data minlag/mermaid-cli \
+    -q -i /data/_batch.md -o /data/_batch-out.md \
+    -c /data/mermaid-config.json -b transparent || batch_ok=0
+  i=1
+  for name in "${names[@]}"; do
+    if [ -s "$MERMAID_DIR/_batch-out-$i.svg" ]; then
+      mv "$MERMAID_DIR/_batch-out-$i.svg" "$MERMAID_DIR/$name.svg"
+      rendered=$((rendered + 1))
+    fi
+    i=$((i + 1))
+  done
+  rm -f "$batch" "$MERMAID_DIR/_batch-out.md" "$MERMAID_DIR"/_batch-out-*.svg
+  if [ "$batch_ok" -eq 0 ]; then
+    # A diagram that breaks the whole batch must not take the others down:
+    # fall back to one container per diagram, exactly as before batching.
+    echo "gitiviz: batched mermaid-cli run failed — retrying per-diagram" >&2
+    for name in "${names[@]}"; do
+      [ -s "$MERMAID_DIR/$name.svg" ] && continue
+      if docker run --rm -v "$MERMAID_DIR":/data minlag/mermaid-cli \
+        -q -i "/data/$name.mmd" -o "/data/$name.svg" \
+        -c /data/mermaid-config.json -I "gitiviz-$name" -b transparent; then
+        rendered=$((rendered + 1))
+      else
+        echo "gitiviz: mermaid-cli failed for $name — that diagram keeps the built-in fallback" >&2
+      fi
+    done
+  fi
+  [ "$rendered" -gt 0 ]
 }
 
 if command -v node >/dev/null 2>&1; then
@@ -75,12 +114,14 @@ elif command -v docker >/dev/null 2>&1; then
   }
   giti_in_docker "$@"
   # Chain link (b), host-side: the containerized CLI cannot reach Docker,
-  # so render its compiled sources here and re-run once to pick them up.
-  # Bounded at exactly one extra pass — never recursive.
+  # so render its compiled sources here (one batched container) and re-run
+  # once to pick them up. Bounded at exactly one extra pass — never
+  # recursive — and skipped entirely when every SVG was already fresh.
   if renders_book "${1-}" && [ -d "$MERMAID_DIR" ] \
     && compgen -G "$MERMAID_DIR/*.mmd" >/dev/null; then
-    render_mermaid_cli
-    giti_in_docker "$@"
+    if render_mermaid_cli; then
+      giti_in_docker "$@"
+    fi
   fi
 else
   echo "gitiviz: needs Node.js 20+ or Docker. Install one and retry." >&2
