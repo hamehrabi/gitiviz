@@ -67,3 +67,4 @@ export {
   renderCommitPage,
   type CommitPageDiagramExtras
 } from "./commitPage.js";
+export { issuesCss, renderIssuesList, type IssueModel } from "./issues.js";

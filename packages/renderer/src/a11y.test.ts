@@ -146,7 +146,7 @@ describe("native interactive controls", () => {
   it("tab navigation is plain anchors with non-empty names and real targets", () => {
     const doc = parse(render());
     const tabs = Array.from(doc.querySelectorAll("nav.sb-nav a.sb-tab"));
-    expect(tabs.length).toBe(5);
+    expect(tabs.length).toBe(6);
     for (const tab of tabs) {
       expect(tab.textContent.trim().length).toBeGreaterThan(0);
       const href = tab.getAttribute("href")!;

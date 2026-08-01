@@ -13,7 +13,7 @@
  *     that regroup the ten canonical chapter projections
  *
  * Mandates (user + design doc "Reader experience"):
- *   - A LIGHT dashboard with a LEFT SIDEBAR NAV (repo wordmark + five view
+ *   - A LIGHT dashboard with a LEFT SIDEBAR NAV (repo wordmark + six view
  *     tabs); under ~736px it collapses to a horizontally scrollable tab row.
  *   - Home (the default view) is a grid of commit cards with CSS-only
  *     filter chips above it.
@@ -58,6 +58,7 @@ import {
 import { renderSidebar, sidebarCss } from "./sidebar.js";
 import { cardsCss, renderCardsGrid, renderFilterChips } from "./cards.js";
 import { commitPageCss, renderCommitPage } from "./commitPage.js";
+import { issuesCss, renderIssuesList, type IssueModel } from "./issues.js";
 import { repoFileUrl, type RenderLinkOptions } from "./links.js";
 import {
   toCardModel,
@@ -133,6 +134,13 @@ export interface RenderOptions {
    * Absent → paths render as plain text and issue cards stay linkless.
    */
   links?: RenderLinkOptions;
+  /**
+   * GitHub issues for the Issues tab (interface contract with the CLI,
+   * which reads them defensively from the host-fetched issues.json).
+   * Every string is still hostile input — the issues module escapes and
+   * origin-validates on output. Absent or empty → the honest empty state.
+   */
+  issues?: readonly IssueModel[];
 }
 
 // ---------------------------------------------------------------------------
@@ -785,6 +793,21 @@ function howItWorksView(change: ChangeManifest): string {
   );
 }
 
+/** The question the Issues view answers. */
+const ISSUES_QUESTION = "What has been discussed and ticketed?";
+
+/**
+ * Issues: the GitHub tickets raised from this book's commit pages (module
+ * issues.ts renders the cards; the host-side launcher fetched the data
+ * with gh). Empty or absent issues render the honest empty state.
+ */
+function issuesView(options: RenderOptions): string {
+  return (
+    viewHead("Issues", escHtml(ISSUES_QUESTION)) +
+    renderIssuesList(options.issues ?? [], options.links)
+  );
+}
+
 /** More: the remaining book chapters, each folded until needed. */
 const MORE_CHAPTER_IDS: readonly ChapterId[] = [
   "journeys",
@@ -838,7 +861,13 @@ const INACTIVE_TAB =
 const FOCUS_RING = `outline:2px solid #1d4ed8;outline-offset:2px`;
 
 /** View ids other than home (home is the :target-less default). */
-const OTHER_VIEW_IDS = ["overview", "architecture", "how-it-works", "more"] as const;
+const OTHER_VIEW_IDS = [
+  "overview",
+  "architecture",
+  "how-it-works",
+  "issues",
+  "more"
+] as const;
 
 /**
  * Base/shell CSS: reset, light theme, layout grid, the `:target`
@@ -891,7 +920,7 @@ function shellCss(): string {
     `main>section:target{display:block}`,
     `#home{display:block}`,
     `main>section:target~#home{display:none}`,
-    `#overview,#architecture,#how-it-works,#more{max-width:44rem}`,
+    `#overview,#architecture,#how-it-works,#issues,#more{max-width:44rem}`,
     ...tabRules,
     // Type scale: view heading > sidebar wordmark > metadata.
     `h2{font-size:1.5rem;font-weight:600;letter-spacing:-0.015em;margin:0 0 0.25rem}`,
@@ -955,9 +984,9 @@ function shellCss(): string {
   ].join("\n");
 }
 
-/** The single stylesheet: shell + the three module CSS constants. */
+/** The single stylesheet: shell + the four module CSS constants. */
 function stylesheet(): string {
-  return [shellCss(), sidebarCss, cardsCss, commitPageCss].join("\n");
+  return [shellCss(), sidebarCss, cardsCss, commitPageCss, issuesCss].join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -971,6 +1000,7 @@ const TABS: readonly ViewTab[] = [
   { id: "overview", label: "Overview", href: "#overview" },
   { id: "architecture", label: "Architecture", href: "#architecture" },
   { id: "how-it-works", label: "How it works", href: "#how-it-works" },
+  { id: "issues", label: "Issues", href: "#issues" },
   { id: "more", label: "More", href: "#more" }
 ];
 
@@ -997,6 +1027,7 @@ export function renderChangeBook(
     `<section id="overview">${overviewView(book, change, meaningful)}</section>` +
     `<section id="architecture">${architectureView(book, change, options)}</section>` +
     `<section id="how-it-works">${howItWorksView(change)}</section>` +
+    `<section id="issues">${issuesView(options)}</section>` +
     `<section id="more">${moreView(book, change)}</section>` +
     commitPages +
     `<section id="home">${homeView(meaningful, change)}</section>`;

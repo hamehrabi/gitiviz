@@ -139,7 +139,14 @@ function styleOf(html: string): string {
   return parse(html).querySelector("style")!.textContent;
 }
 
-const TAB_HREFS = ["#home", "#overview", "#architecture", "#how-it-works", "#more"];
+const TAB_HREFS = [
+  "#home",
+  "#overview",
+  "#architecture",
+  "#how-it-works",
+  "#issues",
+  "#more"
+];
 
 // ---------------------------------------------------------------------------
 // Fixture sanity — the fixtures must be schema-valid or the tests test nothing.
@@ -197,9 +204,9 @@ describe("renderChangeBook document shell", () => {
     const styles = doc.querySelectorAll("style");
     expect(styles.length).toBe(1);
     const css = styles[0]!.textContent;
-    // One marker rule from each contributor, in shell→sb→cd→cp order.
-    const order = [".layout{", ".sb-nav{", ".cd-grid{", ".cp-page{"].map((m) =>
-      css.indexOf(m)
+    // One marker rule from each contributor, in shell→sb→cd→cp→iv order.
+    const order = [".layout{", ".sb-nav{", ".cd-grid{", ".cp-page{", ".iv-card{"].map(
+      (m) => css.indexOf(m)
     );
     for (const index of order) expect(index).toBeGreaterThanOrEqual(0);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -254,7 +261,7 @@ describe("sidebar", () => {
 });
 
 describe("tab navigation", () => {
-  it("renders the five view tabs, in order, as plain anchors", () => {
+  it("renders the six view tabs, in order, as plain anchors", () => {
     const doc = parse(renderDemo());
     const nav = doc.querySelector("nav.sb-nav");
     expect(nav).not.toBeNull();
@@ -266,6 +273,7 @@ describe("tab navigation", () => {
       "Overview",
       "Architecture",
       "How it works",
+      "Issues",
       "More"
     ]);
   });
@@ -309,10 +317,10 @@ describe("tab navigation", () => {
     const css = styleOf(renderDemo());
     // Progressive enhancement: browsers without :has simply keep Home lit.
     expect(css).toContain(
-      "body:has(#overview:target,#architecture:target,#how-it-works:target,#more:target) " +
-        ".sb-item-active .sb-tab"
+      "body:has(#overview:target,#architecture:target,#how-it-works:target," +
+        "#issues:target,#more:target) .sb-item-active .sb-tab"
     );
-    for (const id of ["overview", "architecture", "how-it-works", "more"]) {
+    for (const id of ["overview", "architecture", "how-it-works", "issues", "more"]) {
       expect(css).toContain(`body:has(#${id}:target) .sb-tabs a[href="#${id}"]`);
     }
   });
@@ -907,6 +915,94 @@ describe("how it works view", () => {
     expect(
       doc.querySelector("#how-it-works ol.guide-steps li")!.textContent
     ).toBe('"><img src=x onerror=alert(1)>');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issues view (RenderOptions.issues → iv- cards)
+// ---------------------------------------------------------------------------
+
+describe("issues view", () => {
+  const demoIssues = [
+    {
+      number: 7,
+      title: "Guest checkout drops the cart",
+      state: "OPEN",
+      url: "https://github.com/acme/demo/issues/7",
+      createdAt: "2026-07-30T09:15:00Z"
+    }
+  ];
+
+  it("renders the Issues section with the honest empty state by default", () => {
+    const doc = parse(renderDemo());
+    const section = doc.querySelector("#issues")!;
+    expect(section).not.toBeNull();
+    expect(section.querySelector("h2")!.textContent).toBe("Issues");
+    expect(section.querySelector(".view-sub")!.textContent).toBe(
+      "What has been discussed and ticketed?"
+    );
+    expect(section.textContent).toContain(
+      "No tickets yet — create one from any commit page."
+    );
+    expect(section.querySelectorAll(".iv-card").length).toBe(0);
+  });
+
+  it("renders issue cards from RenderOptions.issues (linkless without an origin)", () => {
+    const doc = parse(renderDemo({ issues: demoIssues }));
+    const section = doc.querySelector("#issues")!;
+    const card = section.querySelector(".iv-card")!;
+    expect(card).not.toBeNull();
+    expect(card.tagName.toLowerCase()).toBe("div");
+    expect(card.querySelector(".iv-number")!.textContent).toBe("#7");
+    expect(card.querySelector(".iv-state")!.textContent).toBe("open");
+    expect(card.querySelector(".iv-date")!.textContent).toBe("2026-07-30");
+    expect(card.querySelector(".iv-title")!.textContent).toBe(
+      "Guest checkout drops the cart"
+    );
+    expect(section.textContent).not.toContain("No tickets yet");
+  });
+
+  it("links issue cards only through the links.origin contract field", () => {
+    const doc = parse(
+      renderDemo({
+        issues: demoIssues,
+        links: { origin: "https://github.com/acme/demo" }
+      })
+    );
+    const link = doc.querySelector("#issues a.iv-card")!;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute("href")).toBe("https://github.com/acme/demo/issues/7");
+    expect(link.getAttribute("rel")).toBe("noopener");
+  });
+
+  it("keeps hostile issues inert end to end", () => {
+    const html = renderDemo({
+      issues: [
+        {
+          number: 1,
+          title: "<img src=x onerror=alert(1)>",
+          state: 'open"><script>alert(2)</script>',
+          url: "javascript:alert(3)",
+          createdAt: "2026-01-01T00:00:00Z"
+        }
+      ],
+      links: { origin: "https://github.com/acme/demo" }
+    });
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).not.toContain("<img src=x");
+    const doc = parse(html);
+    expect(doc.querySelectorAll("script").length).toBe(0);
+    expect(doc.querySelectorAll("#issues a").length).toBe(0);
+    for (const el of Array.from(doc.querySelectorAll("[href]"))) {
+      expect(el.getAttribute("href")!.toLowerCase().startsWith("javascript:")).toBe(
+        false
+      );
+    }
+  });
+
+  it("stays byte-deterministic with issues configured", () => {
+    const render = () => renderDemo({ issues: demoIssues });
+    expect(render()).toBe(render());
   });
 });
 
