@@ -34,6 +34,13 @@ const MAX_SUBJECT_LENGTH = 2000;
 /** Cap on touched paths persisted as a unit's evidence (huge commits). */
 const MAX_EVIDENCE_PATHS = 500;
 
+/**
+ * How far back `knownChangeUnitIds` reads. Bounded so the scan stays cheap on
+ * repositories with very long histories — beyond this a curated story simply
+ * counts as unverifiable and is treated exactly as it is today (rejected).
+ */
+const MAX_KNOWN_COMMITS = 2000;
+
 export interface ChangeUnitsInput {
   repoDir: string;
   baseRef: string;
@@ -57,8 +64,47 @@ interface CommitMeta {
   subject: string;
 }
 
-function unitId(sha: string): string {
+/**
+ * A change unit's id, derived deterministically from its commit sha.
+ *
+ * Exported because the derivation is the ONLY thing that makes a unit id
+ * verifiable: given the repository's history, any id can be checked against
+ * the commits that really exist (see `knownChangeUnitIds`). Never duplicate
+ * this hash — an out-of-sync copy would silently split ids in two.
+ */
+export function unitId(sha: string): string {
   return createHash("sha1").update(`change-unit\0${sha}`).digest("hex").slice(0, 12);
+}
+
+/**
+ * Ids of every change unit this repository could legitimately produce: one per
+ * commit reachable from any ref (plus HEAD), newest-first and bounded at
+ * MAX_KNOWN_COMMITS.
+ *
+ * This is the membership test that separates "a curated story about another
+ * commit" from "a fabricated id". It is deliberately generous about WHICH
+ * commit — the accumulating narration response legitimately describes commits
+ * outside whatever range is being rendered, on this branch or another — and
+ * deliberately strict about whether the commit exists at all: an id that no
+ * real commit hashes to cannot have come from any gitiviz run against this
+ * repository.
+ *
+ * Throws like any other git call when the directory is not a usable
+ * repository; callers must treat that as "cannot verify" and stay strict.
+ */
+export async function knownChangeUnitIds(repoDir: string): Promise<Set<string>> {
+  const { stdout } = await gitRaw(repoDir, [
+    "log",
+    "--all",
+    `--max-count=${MAX_KNOWN_COMMITS}`,
+    "--format=%H"
+  ]);
+  const ids = new Set<string>();
+  for (const line of stdout.split("\n")) {
+    const sha = line.trim();
+    if (sha.length > 0) ids.add(unitId(sha));
+  }
+  return ids;
 }
 
 /**

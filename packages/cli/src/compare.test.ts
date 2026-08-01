@@ -25,6 +25,7 @@ import {
 } from "@gitiviz/schema";
 import type { BookManifest } from "@gitiviz/schema";
 import { CHAPTER_IDS } from "@gitiviz/schema";
+import { unitId } from "@gitiviz/core";
 import { renderToDist, type DiagramPrerenderer } from "./commands/compare.js";
 import { runCli, type CliIo } from "./index.js";
 
@@ -214,6 +215,63 @@ describe("narration-response handling", () => {
     expect(exitCode).toBe(1);
     expect(io.errText()).toContain("narration-response.json");
     expect(io.errText()).toContain("no-such-unit");
+  }, 60_000);
+
+  // The narration response is curated, ACCUMULATING content that projects
+  // commit, so it legitimately carries stories for commits outside whatever
+  // range is being rendered. A change-unit id is derived from its commit sha,
+  // so those can be told apart from invented ids: real commit => set aside,
+  // no such commit => still a hard rejection.
+  it("sets aside a story about a real commit outside the rendered range", async () => {
+    const request = (await readJson(join(out, "narration-request.json"))) as {
+      allowedChangeUnitIds: string[];
+    };
+    const inRange = request.allowedChangeUnitIds[0]!;
+    // mainSha is a real commit in this repository, but main..feature excludes
+    // it — exactly the shape of a story written by an earlier, wider run.
+    const outOfRange = unitId(mainSha);
+    expect(request.allowedChangeUnitIds).not.toContain(outOfRange);
+    await writeFile(
+      join(out, "narration-response.json"),
+      JSON.stringify({
+        changeUnits: [
+          { id: inRange, humanTitle: "Story inside the range" },
+          { id: outOfRange, humanTitle: "Story about an older commit" }
+        ]
+      }),
+      "utf8"
+    );
+    const io = captureIo();
+    const exitCode = await runCli(
+      ["compare", "main", DEMO_FEATURE_BRANCH, "--repo", demoRepo, "--out", out],
+      io
+    );
+    expect(exitCode, io.errText()).toBe(0);
+    expect(io.outText()).toContain("set aside 1 story");
+    const html = await readFile(join(out, "dist", "index.html"), "utf8");
+    expect(html).toContain("Story inside the range");
+    expect(html).not.toContain("Story about an older commit");
+  }, 60_000);
+
+  it("still rejects a fabricated id alongside a legitimate out-of-range story", async () => {
+    await writeFile(
+      join(out, "narration-response.json"),
+      JSON.stringify({
+        changeUnits: [
+          { id: unitId(mainSha), humanTitle: "Story about an older commit" },
+          { id: "no-such-unit", humanTitle: "x" }
+        ]
+      }),
+      "utf8"
+    );
+    const io = captureIo();
+    const exitCode = await runCli(
+      ["compare", "main", DEMO_FEATURE_BRANCH, "--repo", demoRepo, "--out", out],
+      io
+    );
+    expect(exitCode).toBe(1);
+    expect(io.errText()).toContain("no-such-unit");
+    expect(io.errText()).toContain("allowed ids");
   }, 60_000);
 
   it("apply-narration re-renders from manifests on disk without re-analyzing", async () => {

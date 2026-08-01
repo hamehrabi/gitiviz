@@ -46,7 +46,8 @@ import {
   buildBookManifest,
   buildChangeUnits,
   buildEvidenceGraph,
-  buildNarrationRequest
+  buildNarrationRequest,
+  knownChangeUnitIds
 } from "@gitiviz/core";
 import {
   validateBookManifest,
@@ -239,13 +240,99 @@ async function loadValidatedManifests(
   return { change: change.value, book: book.value };
 }
 
-/** Merge a narration response into the manifest or fail with the error list. */
-function mergeNarration(
+/** A response entry's id, or null when the entry is not `{ id: string, … }`. */
+function narrationUnitId(unit: unknown): string | null {
+  if (typeof unit !== "object" || unit === null) return null;
+  const id = (unit as { id?: unknown }).id;
+  return typeof id === "string" ? id : null;
+}
+
+/**
+ * Set aside stories about commits outside the range being rendered — and ONLY
+ * those.
+ *
+ * The narration response is curated, ACCUMULATING content that projects commit
+ * (docs/decisions/0001-committed-artifacts.md), so it legitimately carries
+ * stories for commits that are not in *this* comparison: a single-commit run
+ * against a book narrated over twenty commits, or the window sliding as new
+ * commits land. Rejecting those would wedge every narrated project.
+ *
+ * The id itself tells the two cases apart. Change-unit ids are derived
+ * deterministically from the commit sha (`unitId`), so an id can be VERIFIED
+ * against the repository's real history:
+ *
+ *   - in the current manifest        → narrate normally;
+ *   - not in the manifest but hashes from a real commit in this repository
+ *                                    → a story about another commit: set it
+ *                                      aside silently (one-line count);
+ *   - neither                        → FABRICATED: left in the response so the
+ *                                      validator rejects it exactly as before.
+ *
+ * The known-id scan runs at most once, and only when at least one id is out of
+ * range — the common path costs nothing. When the repository is unavailable
+ * (no repoDir, WORKTREE-only, git failure) nothing can be verified, so nothing
+ * is set aside and the strict behaviour stands: the guard never weakens
+ * silently.
+ *
+ * Malformed entries (non-object, non-string id) always stay in the response —
+ * the validator's job, not this one's.
+ */
+async function scopeToRange(
   change: ChangeManifest,
   response: unknown,
-  source: string
-): ChangeManifest {
-  const merged = applyNarration(change, response);
+  repoDir: string | undefined
+): Promise<{ readonly response: unknown; readonly setAside: readonly string[] }> {
+  if (typeof response !== "object" || response === null) {
+    return { response, setAside: [] };
+  }
+  const units = (response as { changeUnits?: unknown }).changeUnits;
+  if (!Array.isArray(units)) return { response, setAside: [] };
+
+  const inRange = new Set(change.changeUnits.map((unit) => unit.id));
+  const outOfRange = units
+    .map(narrationUnitId)
+    .filter((id): id is string => id !== null && !inRange.has(id));
+  if (outOfRange.length === 0) return { response, setAside: [] };
+
+  // Only now — and only once — is the repository worth reading.
+  if (repoDir === undefined) return { response, setAside: [] };
+  let known: Set<string>;
+  try {
+    known = await knownChangeUnitIds(repoDir);
+  } catch {
+    // Cannot verify anything: stay strict, let the validator speak.
+    return { response, setAside: [] };
+  }
+
+  const setAside: string[] = [];
+  const kept = units.filter((unit) => {
+    const id = narrationUnitId(unit);
+    if (id === null || inRange.has(id)) return true;
+    if (!known.has(id)) return true; // fabricated — the validator rejects it
+    setAside.push(id);
+    return false;
+  });
+  if (setAside.length === 0) return { response, setAside: [] };
+  return { response: { ...(response as object), changeUnits: kept }, setAside };
+}
+
+/** Merge a narration response into the manifest or fail with the error list. */
+async function mergeNarration(
+  change: ChangeManifest,
+  response: unknown,
+  source: string,
+  io: CommandIo,
+  repoDir: string | undefined
+): Promise<ChangeManifest> {
+  const scoped = await scopeToRange(change, response, repoDir);
+  if (scoped.setAside.length > 0) {
+    io.out(
+      `narration: set aside ${scoped.setAside.length} ` +
+        `${scoped.setAside.length === 1 ? "story" : "stories"} about commits ` +
+        "outside this range"
+    );
+  }
+  const merged = applyNarration(change, scoped.response);
   if (!merged.ok) {
     throw new Error(`${source} rejected:\n  - ${merged.errors.join("\n  - ")}`);
   }
@@ -439,7 +526,7 @@ export async function runCompare(options: CompareOptions): Promise<void> {
     }
   }
   if (responseRaw !== undefined) {
-    narrated = mergeNarration(manifest, responseRaw, responsePath);
+    narrated = await mergeNarration(manifest, responseRaw, responsePath, io, repoDir);
     io.out(`merged narration from ${responsePath}`);
   } else {
     // Template output is a deterministic restatement of derived facts, so it
@@ -609,9 +696,11 @@ export async function runValidate(options: ValidateOptions): Promise<void> {
 export interface ApplyNarrationOptions {
   outDir: string;
   /**
-   * The analyzed repository directory — used only to derive the web origin
-   * for diagram click links from the origin remote. Optional: without it
-   * (and without GITIVIZ_REPO_ORIGIN) diagrams simply carry no links.
+   * The analyzed repository directory. Used to derive the web origin for
+   * diagram click links from the origin remote, and to verify narration ids
+   * that fall outside the rendered range against real commits. Optional:
+   * without it (and without GITIVIZ_REPO_ORIGIN) diagrams carry no links and
+   * out-of-range ids cannot be verified, so they are rejected as before.
    */
   repoDir?: string;
   /**
@@ -637,7 +726,13 @@ export async function runApplyNarration(options: ApplyNarrationOptions): Promise
     responsePath,
     "write one from narration-request.json first"
   );
-  const narrated = mergeNarration(change, responseRaw, responsePath);
+  const narrated = await mergeNarration(
+    change,
+    responseRaw,
+    responsePath,
+    io,
+    options.repoDir
+  );
   io.out(`merged narration from ${responsePath}`);
   const repoOrigin =
     options.repoDir !== undefined || options.repoOrigin !== undefined

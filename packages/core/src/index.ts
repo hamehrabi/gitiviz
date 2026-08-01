@@ -5,6 +5,8 @@ export {
 } from "./graph.js";
 export {
   buildChangeUnits,
+  knownChangeUnitIds,
+  unitId,
   type ChangeUnitsInput,
   type ChangeUnitsResult
 } from "./changeUnits.js";

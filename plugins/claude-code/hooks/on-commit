@@ -43,15 +43,19 @@ case "$CMD" in
   *) exit 0 ;;
 esac
 
-# A stale narration response describes the PREVIOUS range and would be
-# rejected against the refreshed manifest — park it, never delete it.
-if [ -f ".gitiviz/narration-response.json" ]; then
-  mv -f ".gitiviz/narration-response.json" ".gitiviz/narration-response.previous.json" 2>/dev/null || exit 0
-fi
-
-# Refresh the deterministic facts for HEAD (best effort — a failed refresh
-# must never surface as a hook error after a successful commit).
-"$SCRIPT_DIR/../scripts/run.sh" commit HEAD >/dev/null 2>&1 || exit 0
+# The narration response is CURATED, ACCUMULATING content — projects commit it
+# (see docs/decisions/0001-committed-artifacts.md) so every clone renders the
+# same book. Never move, rename, or delete it: doing so shows up as a deleted
+# tracked file and throws away work. Instead widen the refresh so the existing
+# stories stay valid: rebuild the whole recent range rather than this commit
+# alone, so every unit id the narration already describes is still in the
+# manifest and only the NEW commit needs a story.
+#
+# Best effort throughout — a failed refresh must never surface as a hook error
+# after a successful commit, and must never swallow the prompt below either:
+# the commit still needs a story, and Claude is the one who writes it. So the
+# exit status is deliberately discarded rather than short-circuiting.
+"$SCRIPT_DIR/../scripts/run.sh" init --commits 20 >/dev/null 2>&1 || true
 
 # Static JSON literal (single-quoted heredoc: nothing is interpolated, so no
 # repo-controlled text can reach this output). ${CLAUDE_PLUGIN_ROOT} is left

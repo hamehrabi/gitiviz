@@ -7352,8 +7352,23 @@ import { createHash as createHash2 } from "node:crypto";
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 var MAX_SUBJECT_LENGTH = 2e3;
 var MAX_EVIDENCE_PATHS = 500;
+var MAX_KNOWN_COMMITS = 2e3;
 function unitId(sha) {
   return createHash2("sha1").update(`change-unit\0${sha}`).digest("hex").slice(0, 12);
+}
+async function knownChangeUnitIds(repoDir) {
+  const { stdout } = await gitRaw(repoDir, [
+    "log",
+    "--all",
+    `--max-count=${MAX_KNOWN_COMMITS}`,
+    "--format=%H"
+  ]);
+  const ids = /* @__PURE__ */ new Set();
+  for (const line of stdout.split("\n")) {
+    const sha = line.trim();
+    if (sha.length > 0) ids.add(unitId(sha));
+  }
+  return ids;
 }
 function parseLog(stdout) {
   const commits = [];
@@ -10792,8 +10807,46 @@ async function loadValidatedManifests(outDir) {
   }
   return { change: change.value, book: book.value };
 }
-function mergeNarration(change, response, source) {
-  const merged = applyNarration(change, response);
+function narrationUnitId(unit) {
+  if (typeof unit !== "object" || unit === null) return null;
+  const id = unit.id;
+  return typeof id === "string" ? id : null;
+}
+async function scopeToRange(change, response, repoDir) {
+  if (typeof response !== "object" || response === null) {
+    return { response, setAside: [] };
+  }
+  const units = response.changeUnits;
+  if (!Array.isArray(units)) return { response, setAside: [] };
+  const inRange = new Set(change.changeUnits.map((unit) => unit.id));
+  const outOfRange = units.map(narrationUnitId).filter((id) => id !== null && !inRange.has(id));
+  if (outOfRange.length === 0) return { response, setAside: [] };
+  if (repoDir === void 0) return { response, setAside: [] };
+  let known;
+  try {
+    known = await knownChangeUnitIds(repoDir);
+  } catch {
+    return { response, setAside: [] };
+  }
+  const setAside = [];
+  const kept = units.filter((unit) => {
+    const id = narrationUnitId(unit);
+    if (id === null || inRange.has(id)) return true;
+    if (!known.has(id)) return true;
+    setAside.push(id);
+    return false;
+  });
+  if (setAside.length === 0) return { response, setAside: [] };
+  return { response: { ...response, changeUnits: kept }, setAside };
+}
+async function mergeNarration(change, response, source, io, repoDir) {
+  const scoped = await scopeToRange(change, response, repoDir);
+  if (scoped.setAside.length > 0) {
+    io.out(
+      `narration: set aside ${scoped.setAside.length} ${scoped.setAside.length === 1 ? "story" : "stories"} about commits outside this range`
+    );
+  }
+  const merged = applyNarration(change, scoped.response);
   if (!merged.ok) {
     throw new Error(`${source} rejected:
   - ${merged.errors.join("\n  - ")}`);
@@ -10911,7 +10964,7 @@ async function runCompare(options) {
     }
   }
   if (responseRaw !== void 0) {
-    narrated = mergeNarration(manifest, responseRaw, responsePath);
+    narrated = await mergeNarration(manifest, responseRaw, responsePath, io, repoDir);
     io.out(`merged narration from ${responsePath}`);
   } else {
     narrated = applyTemplateNarration(manifest);
@@ -11024,7 +11077,13 @@ async function runApplyNarration(options) {
     responsePath,
     "write one from narration-request.json first"
   );
-  const narrated = mergeNarration(change, responseRaw, responsePath);
+  const narrated = await mergeNarration(
+    change,
+    responseRaw,
+    responsePath,
+    io,
+    options.repoDir
+  );
   io.out(`merged narration from ${responsePath}`);
   const repoOrigin = options.repoDir !== void 0 || options.repoOrigin !== void 0 ? await resolveRepoOrigin({
     repoDir: options.repoDir ?? ".",

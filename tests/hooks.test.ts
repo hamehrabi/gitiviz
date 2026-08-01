@@ -7,7 +7,8 @@
  */
 import { execFile } from "node:child_process";
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -126,6 +127,29 @@ describe("plugins/claude-code/hooks/on-commit", () => {
       await removeRepo(repo);
     }
   }, 30_000);
+
+  // A refresh can fail for any number of reasons (a rejected narration
+  // response, an unreadable repository, no Node and no Docker). None of them
+  // change the fact that a commit just landed and needs a story, so the
+  // prompt must still reach Claude — a failed refresh must never swallow it.
+  it("still emits additionalContext when the facts refresh fails", async () => {
+    // .gitiviz/ present but the cwd is not a git repository at all, so the
+    // refresh cannot possibly succeed.
+    const dir = await mkdtemp(join(tmpdir(), "gitiviz-nonrepo-"));
+    try {
+      await mkdir(join(dir, ".gitiviz"), { recursive: true });
+      const result = await runHookWithStdin(dir, commitInput);
+      expect(result.code, result.stderr).toBe(0);
+      const output = JSON.parse(result.stdout) as {
+        hookSpecificOutput?: { additionalContext?: string };
+      };
+      expect(output.hookSpecificOutput?.additionalContext ?? "").toContain(
+        "narration-response.json"
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("refreshes facts for HEAD and emits additionalContext after a git commit", async () => {
     const repo = await makeRepo();
