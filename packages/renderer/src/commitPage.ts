@@ -68,7 +68,14 @@ export const commitPageCss = `
 .cp-not-narrated{color:#9ca3af}
 .cp-diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;overflow-x:auto}
 .cp-diagram svg{display:block;max-width:100%;height:auto}
+.cp-diagram figcaption{margin:0.75rem 0 0;font-size:0.8125rem;color:#6b7280}
 .cp-no-diagram{display:flex;align-items:center;justify-content:center;min-height:6rem;margin:0;color:#6b7280;background:#f9fafb;border-radius:4px}
+.cp-source{margin:0.75rem 0 0}
+.cp-source>summary{cursor:pointer;color:#6b7280;font-size:0.8125rem}
+.cp-source pre{margin:0.5rem 0 0;padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;overflow-x:auto;font-size:0.75rem;line-height:1.5}
+.cp-source code{font-family:${MONO};background:transparent;border:none;padding:0}
+.cp-ev-figure{margin:0.75rem 0;padding:0.5rem;border:1px solid #e5e7eb;border-radius:6px;background:#ffffff;overflow-x:auto}
+.cp-ev-figure svg{display:block;max-width:100%;height:auto}
 .cp-unchanged,.cp-evidence{margin:1rem 0;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem 1rem}
 .cp-unchanged>summary,.cp-evidence>summary{cursor:pointer;color:#6b7280;font-size:0.875rem;overflow-wrap:anywhere}
 .cp-unchanged p{margin:0.5rem 0;font-size:0.875rem;color:#6b7280}
@@ -120,14 +127,28 @@ function beforeAfterRow(
 }
 
 /**
- * The diagram slot. `diagramSvg` is trusted, pre-escaped SVG markup from
- * the diagram module, inserted verbatim (the future Mermaid export adapter
- * plugs in here); null renders a quiet placeholder.
+ * The diagram slot. `diagramSvg` is trusted, pre-escaped SVG markup —
+ * either prerendered Mermaid or the built-in story engine — inserted
+ * verbatim; null renders a quiet placeholder. The optional extras add the
+ * collapsed "Diagram source" fold (escaped mermaid text) and the honest
+ * fallback note, both INSIDE the figure so the page's child budget holds.
  */
-function diagramFigure(diagramSvg: string | null): string {
+function diagramFigure(
+  diagramSvg: string | null,
+  extras: CommitPageDiagramExtras
+): string {
   const body =
     diagramSvg ?? `<p class="cp-no-diagram">No diagram for this change.</p>`;
-  return `<figure class="cp-diagram">${body}</figure>`;
+  const source =
+    extras.sourceText == null
+      ? ""
+      : `<details class="cp-source"><summary>Diagram source</summary>` +
+        `<pre><code>${escHtml(extras.sourceText)}</code></pre></details>`;
+  const note =
+    extras.fallbackNote == null
+      ? ""
+      : `<figcaption>${escHtml(extras.fallbackNote)}</figcaption>`;
+  return `<figure class="cp-diagram">${body}${source}${note}</figure>`;
 }
 
 /** Collapsed "Unchanged: N components" — omitted entirely when N is 0. */
@@ -156,8 +177,11 @@ function anchorLine(anchor: EvidenceAnchor): string {
   return `<li>${DERIVED_MARK} <code>${text}</code></li>`;
 }
 
-/** Technical evidence, collapsed at the bottom: raw subject, commits, anchors. */
-function evidenceFold(unit: CommitPageModel): string {
+/**
+ * Technical evidence, collapsed at the bottom: raw subject, the full
+ * unit-scoped entity graph (the ONLY place it may appear), commits, anchors.
+ */
+function evidenceFold(unit: CommitPageModel, extras: CommitPageDiagramExtras): string {
   const commits = (unit.unit.commits ?? []).map(
     (sha) =>
       `<li>${DERIVED_MARK} Commit ` +
@@ -169,11 +193,16 @@ function evidenceFold(unit: CommitPageModel): string {
     lines.length === 0
       ? `<p class="cp-ev-empty">No recorded evidence for this change.</p>`
       : `<ul class="cp-ev-list">${lines.join("")}</ul>`;
+  const graph =
+    extras.evidenceSvg == null
+      ? ""
+      : `<figure class="cp-ev-figure">${extras.evidenceSvg}</figure>`;
   return (
     `<details class="cp-evidence">` +
     `<summary>Technical evidence</summary>` +
     `<p class="cp-ev-title">${DERIVED_MARK} ` +
     `<code>${escHtml(unit.unit.technicalTitle)}</code></p>` +
+    graph +
     list +
     `</details>`
   );
@@ -183,14 +212,26 @@ function evidenceFold(unit: CommitPageModel): string {
 // Public surface
 // ---------------------------------------------------------------------------
 
+/** Optional diagram extras for one commit page. */
+export interface CommitPageDiagramExtras {
+  /** Mermaid text for the collapsed "Diagram source" fold in the figure. */
+  sourceText?: string | null;
+  /** Honest note when the hero diagram used the built-in fallback engine. */
+  fallbackNote?: string | null;
+  /** Full unit graph SVG — rendered ONLY inside the Technical evidence fold. */
+  evidenceSvg?: string | null;
+}
+
 /**
  * Render one commit page. `diagramSvg` is trusted, pre-escaped SVG markup
- * from the diagram module, inserted verbatim; null renders a quiet
- * placeholder. Pure; deterministic; every repo-derived string escaped.
+ * (prerendered Mermaid or the built-in story engine), inserted verbatim;
+ * null renders a quiet placeholder. Pure; deterministic; every repo-derived
+ * string escaped.
  */
 export function renderCommitPage(
   unit: CommitPageModel,
-  diagramSvg: string | null
+  diagramSvg: string | null,
+  extras: CommitPageDiagramExtras = {}
 ): string {
   const anchorId = escAttr(unit.anchorId);
   const mark = unit.titleInferred ? ` ${INFERRED_MARK}` : "";
@@ -206,10 +247,10 @@ export function renderCommitPage(
     beforeAfterRow("before", "Before", unit.before) +
     beforeAfterRow("after", "After", unit.after) +
     `</dl>` +
-    diagramFigure(diagramSvg) +
+    diagramFigure(diagramSvg, extras) +
     unchangedFold(unit.unchangedCount) +
     `<p class="cp-back"><a class="cp-back-link" href="#">← All changes</a></p>` +
-    evidenceFold(unit) +
+    evidenceFold(unit, extras) +
     `</section>`
   );
 }

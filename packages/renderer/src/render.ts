@@ -38,17 +38,30 @@ import type {
   ChangeState,
   ChangeUnit,
   ChapterId,
+  ConceptDiagram,
   Entity,
   EvidenceAnchor,
   Relationship
 } from "@gitiviz/schema";
+import {
+  buildOverviewStory,
+  buildUnitStory,
+  type StoryProjection
+} from "@gitiviz/core";
 import { escHtml } from "./escape.js";
+import { changeDiagram, contextDiagram } from "./diagram.js";
+import {
+  conceptDiagramToMermaid,
+  storyProjectionToMermaid,
+  type MermaidCompileOptions
+} from "./mermaid.js";
 import { renderSidebar, sidebarCss } from "./sidebar.js";
 import { cardsCss, renderCardsGrid, renderFilterChips } from "./cards.js";
 import { commitPageCss, renderCommitPage } from "./commitPage.js";
 import {
   toCardModel,
   toCommitPageModel,
+  unitAnchorId,
   type ViewTab
 } from "./dashboardTypes.js";
 
@@ -76,6 +89,32 @@ export interface DiagramRequest {
  */
 export type RenderDiagram = (request: DiagramRequest) => string | null;
 
+/** One prerendered Mermaid diagram: the compiled source and its sanitized SVG. */
+export interface PrerenderedDiagram {
+  /** The exact mermaid text the SVG was rendered from (staleness check). */
+  text: string;
+  /** Sanitized standalone `<svg>` markup, inserted verbatim. */
+  svg: string;
+}
+
+/** Mermaid diagram options threaded through the render. */
+export interface MermaidRenderOptions {
+  /**
+   * Web URL prefix for click-through links to files, e.g.
+   * "https://github.com/acme/demo/blob/abc123". Without it no click
+   * directives are compiled.
+   */
+  linkBase?: string;
+  /** Origins allowed to use http: links (https: always allowed). */
+  allowedOrigins?: readonly string[];
+  /**
+   * Prerendered SVG per diagram slot id (see `collectMermaidSources`).
+   * A slot whose stored `text` no longer matches the freshly compiled
+   * source is ignored — the honest built-in fallback renders instead.
+   */
+  svgs?: ReadonlyMap<string, PrerenderedDiagram>;
+}
+
 export interface RenderOptions {
   renderDiagram?: RenderDiagram;
   /**
@@ -84,6 +123,8 @@ export interface RenderOptions {
    * repository name is used.
    */
   repoName?: string;
+  /** Mermaid concept diagrams (visual bar: docs/visual-reference.mmd). */
+  mermaid?: MermaidRenderOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,22 +227,195 @@ function anchorLine(anchor: EvidenceAnchor): string {
   return `<li>${DERIVED_MARK} <code>${text}</code></li>`;
 }
 
-function evidenceDetails(anchors: EvidenceAnchor[]): string {
-  if (anchors.length === 0) return "";
-  return (
-    `<details><summary>Technical evidence</summary>` +
-    `<ul class="evidence">${anchors.map(anchorLine).join("")}</ul>` +
-    `</details>`
+// ---------------------------------------------------------------------------
+// Mermaid concept diagrams (visual bar: docs/visual-reference.mmd)
+// ---------------------------------------------------------------------------
+
+/** One diagram slot: a stable id ("architecture", "u0"…) and mermaid text. */
+export interface MermaidSource {
+  id: string;
+  text: string;
+}
+
+/** Honest note shown when a diagram fell back to the built-in engine. */
+const MERMAID_FALLBACK_NOTE =
+  "Rendered with the built-in diagram engine — Mermaid was unavailable at build time.";
+
+/** Every evidence path in the manifest — the only files clicks may target. */
+function evidenceFiles(change: ChangeManifest): ReadonlySet<string> {
+  const files = new Set<string>();
+  const collect = (anchors: EvidenceAnchor[] | undefined): void => {
+    for (const anchor of anchors ?? []) files.add(anchor.path);
+  };
+  for (const entity of change.entities) collect(entity.evidence);
+  for (const rel of change.relationships) collect(rel.evidence);
+  for (const unit of change.changeUnits) collect(unit.evidence);
+  return files;
+}
+
+function compileOptions(
+  change: ChangeManifest,
+  mermaid: MermaidRenderOptions | undefined
+): MermaidCompileOptions {
+  return {
+    ...(mermaid?.linkBase !== undefined ? { linkBase: mermaid.linkBase } : {}),
+    ...(mermaid?.allowedOrigins !== undefined
+      ? { allowedOrigins: mermaid.allowedOrigins }
+      : {}),
+    existingFiles: evidenceFiles(change)
+  };
+}
+
+/**
+ * Mermaid source for the architecture hero: the narrated concept diagram
+ * when present, else the whole-range story projection. Null when the
+ * systems chapter is unwritten or the story is empty.
+ */
+function architectureMermaidSource(
+  book: BookManifest,
+  change: ChangeManifest,
+  mermaid: MermaidRenderOptions | undefined
+): string | null {
+  const chapter = book.chapters.find((c) => c.id === "systems");
+  if (chapter === undefined || chapter.status === "not-written") return null;
+  if (change.architectureDiagram !== undefined) {
+    return conceptDiagramToMermaid(
+      change.architectureDiagram,
+      compileOptions(change, mermaid)
+    );
+  }
+  return storyProjectionToMermaid(
+    buildOverviewStory(change.entities, change.relationships)
   );
 }
 
-function diagramFigure(
-  request: DiagramRequest,
-  renderDiagram: RenderDiagram | undefined,
+/**
+ * Mermaid source for one commit page: the unit's narrated story diagram
+ * when present, else its story projection. Null for an empty story.
+ */
+function unitMermaidSource(
+  unit: ChangeUnit,
+  change: ChangeManifest,
+  mermaid: MermaidRenderOptions | undefined
+): string | null {
+  if (unit.storyDiagram !== undefined) {
+    return conceptDiagramToMermaid(unit.storyDiagram, compileOptions(change, mermaid));
+  }
+  return storyProjectionToMermaid(
+    buildUnitStory(unit, change.entities, change.relationships)
+  );
+}
+
+/**
+ * Every mermaid diagram the book will show, one entry per slot, in
+ * document order. The caller prerenders these (see mermaidSvg.ts) and
+ * passes the results back as `RenderOptions.mermaid.svgs` keyed by `id`.
+ * Pure and byte-deterministic — the same inputs always produce the same
+ * texts `renderChangeBook` recompiles internally.
+ */
+export function collectMermaidSources(
+  book: BookManifest,
+  change: ChangeManifest,
+  mermaid?: MermaidRenderOptions
+): MermaidSource[] {
+  const sources: MermaidSource[] = [];
+  const architecture = architectureMermaidSource(book, change, mermaid);
+  if (architecture !== null) sources.push({ id: "architecture", text: architecture });
+  const meaningful = change.changeUnits.filter((unit) => !unit.grouped);
+  meaningful.forEach((unit, index) => {
+    const text = unitMermaidSource(unit, change, mermaid);
+    if (text !== null) sources.push({ id: unitAnchorId(index), text });
+  });
+  return sources;
+}
+
+/** The prerendered SVG for a slot — only when its source text still matches. */
+function prerenderedSvg(
+  slotId: string,
+  sourceText: string | null,
+  mermaid: MermaidRenderOptions | undefined
+): string | null {
+  if (sourceText === null) return null;
+  const entry = mermaid?.svgs?.get(slotId);
+  if (entry === undefined || entry.text !== sourceText) return null;
+  return entry.svg;
+}
+
+// ---------------------------------------------------------------------------
+// Built-in fallback engine (honest stand-in when Mermaid is unavailable)
+// ---------------------------------------------------------------------------
+
+/** Synthesize concept-level entities from a story projection. */
+function storyFallbackSvg(
+  projection: StoryProjection,
+  kind: "context" | "change"
+): string | null {
+  if (projection.nodes.length === 0) return null;
+  const entities: Entity[] = projection.nodes.map((node) => ({
+    id: node.id,
+    kind: node.kind === "system" ? "system" : "component",
+    humanLabel: node.humanLabel,
+    technicalLabel: `${node.count} change${node.count === 1 ? "" : "s"}`,
+    baseState: "unchanged",
+    headState: node.changeState,
+    provenance: "derived"
+  }));
+  const relationships: Relationship[] = projection.edges.map((edge, index) => ({
+    id: `story-edge-${index}`,
+    from: edge.from,
+    to: edge.to,
+    verb: edge.verb,
+    baseState: "unchanged",
+    headState: "unchanged",
+    provenance: "derived"
+  }));
+  return kind === "context"
+    ? contextDiagram(entities, relationships)
+    : changeDiagram(entities, relationships);
+}
+
+/** Synthesize concept-level entities from a validated concept diagram. */
+function conceptFallbackSvg(
+  diagram: ConceptDiagram,
+  kind: "context" | "change"
+): string | null {
+  if (diagram.nodes.length === 0) return null;
+  const entities: Entity[] = diagram.nodes.map((node) => ({
+    id: node.id,
+    kind: "component",
+    humanLabel: node.humanLabel,
+    technicalLabel: node.role,
+    baseState: "unchanged",
+    headState: "unchanged",
+    provenance: diagram.provenance
+  }));
+  const relationships: Relationship[] = diagram.edges.map((edge, index) => ({
+    id: `concept-edge-${index}`,
+    from: edge.from,
+    to: edge.to,
+    verb: edge.verb,
+    baseState: "unchanged",
+    headState: "unchanged",
+    provenance: diagram.provenance
+  }));
+  return kind === "context"
+    ? contextDiagram(entities, relationships)
+    : changeDiagram(entities, relationships);
+}
+
+/**
+ * The hero diagram figure: prerendered Mermaid SVG when available, else
+ * the built-in fallback with its honest note, else a quiet placeholder.
+ * The collapsed "Diagram source" fold ships the mermaid text either way.
+ */
+function heroFigure(
+  svg: string | null,
+  sourceText: string | null,
+  mermaidRendered: boolean,
   caption: string
 ): string {
-  const svg = renderDiagram ? renderDiagram(request) : null;
-  const captionHtml = caption === "" ? "" : `<p class="caption">${escHtml(caption)}</p>`;
+  const captionHtml =
+    caption === "" ? "" : `<p class="caption">${escHtml(caption)}</p>`;
   if (svg === null) {
     return (
       captionHtml +
@@ -210,7 +424,15 @@ function diagramFigure(
       `</figure>`
     );
   }
-  return captionHtml + `<figure class="diagram">${svg}</figure>`;
+  const source =
+    sourceText === null
+      ? ""
+      : `<details class="diagram-source"><summary>Diagram source</summary>` +
+        `<pre><code>${escHtml(sourceText)}</code></pre></details>`;
+  const note = mermaidRendered
+    ? ""
+    : `<figcaption class="diagram-note">${escHtml(MERMAID_FALLBACK_NOTE)}</figcaption>`;
+  return captionHtml + `<figure class="diagram">${svg}${source}${note}</figure>`;
 }
 
 /**
@@ -319,10 +541,12 @@ function homeView(meaningful: ChangeUnit[], change: ChangeManifest): string {
 }
 
 /**
- * One commit's own page (module C), reached by clicking its card. The
- * before→after diagram is scoped to the entities/relationships the unit
- * touches and compiled through the existing SVG engine (`renderDiagram`),
- * which doubles as the future Mermaid insertion point.
+ * One commit's own page (module C), reached by clicking its card. It opens
+ * with plain English (title, purpose, before/after) and only THEN shows the
+ * small story diagram — prerendered Mermaid when available, the built-in
+ * engine (plus honest note) otherwise. The full unit-scoped entity graph
+ * from `renderDiagram` lands inside the collapsed Technical evidence fold,
+ * never in the default view.
  */
 function commitPageSection(
   unit: ChangeUnit,
@@ -339,10 +563,27 @@ function commitPageSection(
       : change.relationships.filter(
           (rel) => entityIds.has(rel.from) && entityIds.has(rel.to)
         );
-  const svg = options.renderDiagram
+  const evidenceSvg = options.renderDiagram
     ? options.renderDiagram({ kind: "change", entities, relationships, changeUnit: unit })
     : null;
-  return renderCommitPage(toCommitPageModel(unit, index, change), svg);
+
+  const sourceText = unitMermaidSource(unit, change, options.mermaid);
+  const mermaidSvg = prerenderedSvg(unitAnchorId(index), sourceText, options.mermaid);
+  const fallbackSvg =
+    mermaidSvg !== null || sourceText === null
+      ? null
+      : unit.storyDiagram !== undefined
+        ? conceptFallbackSvg(unit.storyDiagram, "change")
+        : storyFallbackSvg(
+            buildUnitStory(unit, change.entities, change.relationships),
+            "change"
+          );
+  const heroSvg = mermaidSvg ?? fallbackSvg;
+  return renderCommitPage(toCommitPageModel(unit, index, change), heroSvg, {
+    sourceText,
+    fallbackNote: fallbackSvg !== null ? MERMAID_FALLBACK_NOTE : null,
+    evidenceSvg
+  });
 }
 
 /** Overview: what the repo is + a brief summary of this change. */
@@ -379,7 +620,12 @@ function overviewView(
   );
 }
 
-/** Architecture: the systems diagram plus its derived facts. */
+/**
+ * Architecture: the narrated concept diagram (else the whole-range story
+ * projection) rendered big and first, in the visual-reference language.
+ * The full entity graph, entity list, connections, and anchors all fold
+ * into the collapsed Technical evidence — never the default view.
+ */
 function architectureView(
   book: BookManifest,
   change: ChangeManifest,
@@ -390,21 +636,50 @@ function architectureView(
   if (chapter === undefined || chapter.status === "not-written") {
     return head + `<p class="muted">Not yet written.</p>`;
   }
-  return (
-    head +
-    diagramFigure(
-      {
+
+  const narration = change.chapterNarrations?.systems;
+  const lede =
+    narration === undefined
+      ? ""
+      : `<p>${INFERRED_MARK} ${escHtml(narration.summary)}</p>`;
+
+  const sourceText = architectureMermaidSource(book, change, options.mermaid);
+  const mermaidSvg = prerenderedSvg("architecture", sourceText, options.mermaid);
+  const fallbackSvg =
+    mermaidSvg !== null || sourceText === null
+      ? null
+      : change.architectureDiagram !== undefined
+        ? conceptFallbackSvg(change.architectureDiagram, "context")
+        : storyFallbackSvg(
+            buildOverviewStory(change.entities, change.relationships),
+            "context"
+          );
+  const hero = heroFigure(
+    mermaidSvg ?? fallbackSvg,
+    sourceText,
+    mermaidSvg !== null,
+    "The systems this change touches, at a glance."
+  );
+
+  const fullGraph = options.renderDiagram
+    ? options.renderDiagram({
         kind: "context",
         entities: change.entities,
         relationships: change.relationships
-      },
-      options.renderDiagram,
-      "The systems this change touches, at a glance."
-    ) +
+      })
+    : null;
+  const anchors = change.entities.flatMap((entity) => entity.evidence ?? []);
+  const evidence =
+    `<details><summary>Technical evidence</summary>` +
+    (fullGraph === null ? "" : `<figure class="diagram">${fullGraph}</figure>`) +
     entityList(change.entities) +
     relationshipList(change) +
-    evidenceDetails(change.entities.flatMap((entity) => entity.evidence ?? []))
-  );
+    (anchors.length === 0
+      ? ""
+      : `<ul class="evidence">${anchors.map(anchorLine).join("")}</ul>`) +
+    `</details>`;
+
+  return head + lede + hero + evidence;
 }
 
 /** How it works: how value moves — the derived relationship flows. */
@@ -546,6 +821,13 @@ function shellCss(): string {
       `background:#ffffff;overflow-x:auto}`,
     `figure.diagram svg{display:block;max-width:100%;height:auto}`,
     `figure.diagram-placeholder{display:flex;align-items:center;justify-content:center;min-height:8rem;background:#f9fafb}`,
+    // Honest fallback note + collapsed mermaid source under each diagram.
+    `figure.diagram figcaption.diagram-note{margin:0.75rem 0 0;font-size:0.8125rem;color:#6b7280}`,
+    `figure.diagram details.diagram-source{margin:0.75rem 0 0;border:none;border-radius:0;padding:0}`,
+    `figure.diagram details.diagram-source summary{font-size:0.8125rem}`,
+    `figure.diagram details.diagram-source pre{margin:0.5rem 0 0;padding:0.75rem;background:#f9fafb;` +
+      `border:1px solid #e5e7eb;border-radius:6px;overflow-x:auto;font-size:0.75rem;line-height:1.5}`,
+    `figure.diagram details.diagram-source code{background:transparent;border:none;padding:0}`,
     `.caption{margin:1.5rem 0 0.5rem;font-size:1.0625rem}`,
     // Vertical commit timeline: hairline spine, one node per change unit.
     `ol.timeline{list-style:none;margin:1rem 0 0.5rem;padding:0}`,

@@ -177,6 +177,52 @@ describe("renderCommitPage diagram", () => {
       "No diagram for this change."
     );
   });
+
+  it("folds the escaped mermaid source inside the figure, closed by default", () => {
+    const source = 'flowchart TD\nn0["Guest checkout<br/>new order path"]';
+    const { root } = parse(
+      renderCommitPage(demoModel(), DIAGRAM_SVG, { sourceText: source })
+    );
+    const fold = root.querySelector(".cp-diagram details.cp-source");
+    expect(fold).not.toBeNull();
+    expect(fold!.hasAttribute("open")).toBe(false);
+    expect(fold!.querySelector("summary")!.textContent).toBe("Diagram source");
+    expect(fold!.querySelector("pre")!.textContent).toContain("flowchart TD");
+    // The source text is escaped, never interpreted as markup.
+    expect(root.querySelector(".cp-source br")).toBeNull();
+  });
+
+  it("shows the honest fallback note inside the figure when provided", () => {
+    const { root } = parse(
+      renderCommitPage(demoModel(), DIAGRAM_SVG, {
+        fallbackNote: "Rendered with the built-in diagram engine."
+      })
+    );
+    const note = root.querySelector(".cp-diagram figcaption");
+    expect(note).not.toBeNull();
+    expect(note!.textContent).toBe("Rendered with the built-in diagram engine.");
+  });
+
+  it("keeps the child budget with all extras present", () => {
+    const { root } = parse(
+      renderCommitPage(demoModel(), DIAGRAM_SVG, {
+        sourceText: "flowchart TD",
+        fallbackNote: "note",
+        evidenceSvg: DIAGRAM_SVG
+      })
+    );
+    expect(root.children.length).toBeLessThanOrEqual(8);
+  });
+
+  it("places the full-graph SVG only inside the technical evidence fold", () => {
+    const evidenceSvg = `<svg role="img" aria-label="full-graph" viewBox="0 0 10 10"></svg>`;
+    const { root } = parse(
+      renderCommitPage(demoModel(), DIAGRAM_SVG, { evidenceSvg })
+    );
+    const inEvidence = root.querySelector('.cp-evidence svg[aria-label="full-graph"]');
+    expect(inEvidence).not.toBeNull();
+    expect(root.querySelectorAll('svg[aria-label="full-graph"]').length).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -19,10 +19,27 @@ export {
   type Point
 } from "./layout.js";
 export {
+  MERMAID_TONE_CLASSDEFS,
+  conceptDiagramToMermaid,
+  storyProjectionToMermaid,
+  type MermaidCompileOptions
+} from "./mermaid.js";
+export {
+  renderChangeBookWithMermaid,
+  renderMermaidDiagram,
+  sanitizeMermaidSvg,
+  type MermaidRenderResult,
+  type MermaidSvgOptions
+} from "./mermaidSvg.js";
+export {
+  collectMermaidSources,
   commitType,
   renderChangeBook,
   type CommitType,
   type DiagramRequest,
+  type MermaidRenderOptions,
+  type MermaidSource,
+  type PrerenderedDiagram,
   type RenderDiagram,
   type RenderOptions
 } from "./render.js";
@@ -38,4 +55,8 @@ export {
 } from "./dashboardTypes.js";
 export { renderSidebar, sidebarCss } from "./sidebar.js";
 export { cardsCss, renderCardsGrid, renderFilterChips } from "./cards.js";
-export { commitPageCss, renderCommitPage } from "./commitPage.js";
+export {
+  commitPageCss,
+  renderCommitPage,
+  type CommitPageDiagramExtras
+} from "./commitPage.js";

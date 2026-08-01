@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { Window } from "happy-dom";
 import type { BookManifest, ChangeManifest } from "@gitiviz/schema";
 import { CHAPTER_IDS, validateBookManifest, validateChangeManifest } from "@gitiviz/schema";
-import { renderChangeBook, type DiagramRequest } from "./render.js";
+import {
+  collectMermaidSources,
+  renderChangeBook,
+  type DiagramRequest
+} from "./render.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -773,12 +777,12 @@ describe("provenance markers", () => {
 // ---------------------------------------------------------------------------
 
 describe("diagram insertion point", () => {
-  it("invokes the renderDiagram callback for the architecture view and commit pages", () => {
+  it("invokes the renderDiagram callback for the full evidence graphs, folded away", () => {
     const requests: DiagramRequest[] = [];
     const html = renderDemo({
       renderDiagram: (req) => {
         requests.push(req);
-        return `<svg role="img" aria-label="diagram" viewBox="0 0 10 10"></svg>`;
+        return `<svg role="img" aria-label="full-graph" viewBox="0 0 10 10"></svg>`;
       }
     });
     const context = requests.filter((r) => r.kind === "context");
@@ -790,25 +794,183 @@ describe("diagram insertion point", () => {
     const changeReq = changes.find((r) => r.changeUnit?.id === "unit-1")!;
     expect(changeReq.entities.map((e) => e.id).sort()).toEqual(["ent-route", "ent-service"]);
     expect(changeReq.relationships.map((r) => r.id)).toEqual(["rel-1"]);
-    expect(html).toContain('aria-label="diagram"');
-    // The commit-page figure carries the SVG verbatim.
+    expect(html).toContain('aria-label="full-graph"');
+    // Full entity graphs live ONLY inside collapsed details, never in a
+    // default view (user mandate: no file/module grids outside evidence).
     const doc = parse(html);
-    expect(doc.querySelectorAll("figure.cp-diagram svg").length).toBe(2);
+    const fullGraphs = Array.from(doc.querySelectorAll('svg[aria-label="full-graph"]'));
+    expect(fullGraphs.length).toBe(3);
+    for (const svg of fullGraphs) {
+      const details = svg.closest("details");
+      expect(details).not.toBeNull();
+      expect(details!.hasAttribute("open")).toBe(false);
+    }
   });
 
-  it("renders quiet placeholders when no diagram renderer is supplied", () => {
+  it("always renders the story diagram as the hero — even with no callback", () => {
     const doc = parse(renderDemo());
-    // Architecture view placeholder…
-    expect(doc.querySelectorAll("figure.diagram-placeholder").length).toBeGreaterThan(0);
-    // …and one per commit page.
-    expect(doc.querySelectorAll("figure.cp-diagram .cp-no-diagram").length).toBe(2);
-    expect(doc.querySelectorAll("svg").length).toBe(0);
+    // Architecture hero: the overview story rolled up by the built-in engine.
+    expect(doc.querySelectorAll("#architecture figure.diagram svg").length).toBe(1);
+    // One story hero per commit page.
+    expect(doc.querySelectorAll("figure.cp-diagram svg").length).toBe(2);
+    // The honest note explains that Mermaid was unavailable at build time.
+    expect(doc.body.textContent).toContain("built-in diagram engine");
   });
 
-  it("renders placeholders when the callback declines with null", () => {
+  it("omits evidence graphs quietly when the callback declines with null", () => {
     const doc = parse(renderDemo({ renderDiagram: () => null }));
-    expect(doc.querySelectorAll("figure.diagram-placeholder").length).toBeGreaterThan(0);
-    expect(doc.querySelectorAll("figure.cp-diagram .cp-no-diagram").length).toBe(2);
+    // Heroes still render through the built-in story engine.
+    expect(doc.querySelectorAll("figure.cp-diagram svg").length).toBe(2);
+    // No dangling placeholders inside the evidence folds.
+    expect(doc.querySelectorAll("details figure.diagram-placeholder").length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mermaid concept diagrams (visual bar: docs/visual-reference.mmd)
+// ---------------------------------------------------------------------------
+
+describe("mermaid concept diagrams", () => {
+  function narratedChange(): ChangeManifest {
+    const change = demoChange();
+    change.architectureDiagram = {
+      clusters: [{ id: "shop", title: "Shop & Checkout", tone: "blue" }],
+      nodes: [
+        {
+          id: "orders",
+          cluster: "shop",
+          humanLabel: "Order intake",
+          role: "order endpoints",
+          file: "src/routes/orders.ts"
+        }
+      ],
+      edges: [],
+      provenance: "inferred",
+      confidence: 0.9
+    };
+    change.changeUnits[0]!.storyDiagram = {
+      nodes: [
+        { id: "checkout", humanLabel: "Guest checkout", role: "new order path" },
+        { id: "orders", humanLabel: "Order intake", role: "order endpoints" }
+      ],
+      edges: [{ from: "checkout", to: "orders", verb: "submits orders to" }],
+      provenance: "inferred",
+      confidence: 0.9
+    };
+    return change;
+  }
+
+  it("narrated fixtures stay schema-valid", () => {
+    expect(validateChangeManifest(narratedChange()).ok).toBe(true);
+  });
+
+  it("collects one deterministic mermaid source per diagram slot", () => {
+    const change = narratedChange();
+    const sources = collectMermaidSources(demoBook(change), change);
+    const ids = sources.map((s) => s.id);
+    expect(ids).toEqual(["architecture", "u0", "u1"]);
+    for (const source of sources) {
+      expect(source.text.startsWith("flowchart TD")).toBe(true);
+    }
+    // The narrated architecture diagram wins over the story projection.
+    expect(sources[0]!.text).toContain("Shop #amp; Checkout");
+    // The narrated unit story wins for u0; u1 falls back to the projection.
+    expect(sources[1]!.text).toContain('|"submits orders to"|');
+    expect(sources[2]!.text).toContain("Other changes");
+  });
+
+  it("skips the architecture slot when the systems chapter is not written", () => {
+    const change = narratedChange();
+    const book = demoBook(change);
+    book.chapters = book.chapters.map((c) =>
+      c.id === "systems" ? { ...c, status: "not-written" as const } : c
+    );
+    const ids = collectMermaidSources(book, change).map((s) => s.id);
+    expect(ids).toEqual(["u0", "u1"]);
+  });
+
+  it("embeds prerendered SVGs big and first, with no fallback note", () => {
+    const change = narratedChange();
+    const book = demoBook(change);
+    const svgs = new Map(
+      collectMermaidSources(book, change).map(({ id, text }) => [
+        id,
+        { text, svg: `<svg role="img" aria-label="mmd-${id}" viewBox="0 0 10 10"></svg>` }
+      ])
+    );
+    const doc = parse(renderChangeBook(book, change, { mermaid: { svgs } }));
+    const arch = doc.querySelector("#architecture")!;
+    expect(arch.querySelector('svg[aria-label="mmd-architecture"]')).not.toBeNull();
+    // Big and first: the hero figure precedes the entity list and evidence.
+    const archHtml = arch.innerHTML;
+    expect(archHtml.indexOf("mmd-architecture")).toBeLessThan(archHtml.indexOf("<details"));
+    expect(doc.querySelector('#u0 figure.cp-diagram svg[aria-label="mmd-u0"]')).not.toBeNull();
+    expect(doc.querySelector('#u1 figure.cp-diagram svg[aria-label="mmd-u1"]')).not.toBeNull();
+    expect(doc.body.textContent).not.toContain("built-in diagram engine");
+  });
+
+  it("commit pages put plain English before any diagram", () => {
+    const change = narratedChange();
+    const book = demoBook(change);
+    const doc = parse(renderChangeBook(book, change, {}));
+    const page = doc.querySelector("#u0")!;
+    const html = page.innerHTML;
+    expect(html.indexOf("cp-title")).toBeLessThan(html.indexOf("cp-diagram"));
+    expect(html.indexOf("cp-beforeafter")).toBeLessThan(html.indexOf("cp-diagram"));
+  });
+
+  it("folds a Diagram source block with the escaped mermaid text under every diagram", () => {
+    const change = narratedChange();
+    const book = demoBook(change);
+    const doc = parse(renderChangeBook(book, change, {}));
+    const sources = Array.from(doc.querySelectorAll("details")).filter((d) =>
+      d.querySelector("summary")?.textContent?.includes("Diagram source")
+    );
+    expect(sources.length).toBe(3);
+    for (const fold of sources) expect(fold.hasAttribute("open")).toBe(false);
+    const archSource = doc.querySelector("#architecture figure.diagram details pre");
+    expect(archSource).not.toBeNull();
+    expect(archSource!.textContent).toContain("flowchart TD");
+    expect(archSource!.textContent).toContain("Shop #amp; Checkout");
+  });
+
+  it("ignores a prerendered SVG whose source text no longer matches", () => {
+    const change = narratedChange();
+    const book = demoBook(change);
+    const svgs = new Map([
+      [
+        "architecture",
+        { text: "flowchart TD\nstale", svg: `<svg role="img" aria-label="stale"></svg>` }
+      ]
+    ]);
+    const doc = parse(renderChangeBook(book, change, { mermaid: { svgs } }));
+    expect(doc.querySelector('svg[aria-label="stale"]')).toBeNull();
+    // Falls back honestly instead.
+    expect(doc.querySelector("#architecture")!.textContent).toContain("built-in diagram engine");
+  });
+
+  it("threads the click-through link base into the collected sources", () => {
+    const change = narratedChange();
+    const sources = collectMermaidSources(demoBook(change), change, {
+      linkBase: "https://github.com/acme/demo/blob/abc123"
+    });
+    expect(sources[0]!.text).toContain(
+      'click n0 "https://github.com/acme/demo/blob/abc123/src/routes/orders.ts" _blank'
+    );
+  });
+
+  it("stays byte-deterministic with mermaid options", () => {
+    const change = narratedChange();
+    const book = demoBook(change);
+    const svgs = new Map(
+      collectMermaidSources(book, change).map(({ id, text }) => [
+        id,
+        { text, svg: `<svg role="img" aria-label="mmd-${id}"></svg>` }
+      ])
+    );
+    const a = renderChangeBook(book, change, { mermaid: { svgs } });
+    const b = renderChangeBook(book, change, { mermaid: { svgs } });
+    expect(a).toBe(b);
   });
 });
 
