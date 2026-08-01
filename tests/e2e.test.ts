@@ -120,6 +120,19 @@ describe("e2e: manifests", () => {
     for (const anchor of anchors) {
       expect(isReal(anchor.path), `fabricated anchor path: ${anchor.path}`).toBe(true);
     }
+    // The unit sweep is non-vacuous: every meaningful (non-grouped) change
+    // unit carries its commit's touched paths as Sources evidence; grouped
+    // commits (no chapter) carry none.
+    for (const unit of change.changeUnits) {
+      if (unit.grouped === true) {
+        expect(unit.evidence, `grouped unit ${unit.id} must carry no evidence`).toBeUndefined();
+      } else {
+        expect(
+          unit.evidence?.length ?? 0,
+          `non-grouped unit ${unit.id} has no evidence paths`
+        ).toBeGreaterThan(0);
+      }
+    }
   });
 });
 

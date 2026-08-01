@@ -310,11 +310,29 @@ export async function renderToDist(options: RenderToDistOptions): Promise<void> 
   const { svgs, notes } = await prerender(sources, { outDir, allowedOrigins });
   for (const note of notes) io.out(note);
 
-  const html = renderChangeBook(book, change, {
+  // Repo link policy for the renderer's Sources/Issues views (same values
+  // the mermaid click-through links already use): `origin` is the repo's
+  // web URL, `linkBase` pins it to the analyzed head sha, and
+  // `allowedOrigins` scopes safeUrl. Every composed link is re-validated
+  // renderer-side; absent fields honestly disable linking.
+  const links = {
+    ...(mermaidOptions.linkBase !== undefined
+      ? { linkBase: mermaidOptions.linkBase }
+      : {}),
+    ...(repoOrigin !== null && originHost !== null ? { origin: repoOrigin } : {}),
+    ...(allowedOrigins.length > 0 ? { allowedOrigins } : {})
+  };
+
+  // Built as a plain object (not an inline literal) so the CLI keeps
+  // compiling while the renderer's RenderOptions catches up with the
+  // links/issues contract fields.
+  const renderOptions = {
     renderDiagram: compileDiagram,
     ...(options.repoName !== undefined ? { repoName: options.repoName } : {}),
-    mermaid: { ...mermaidOptions, svgs }
-  });
+    mermaid: { ...mermaidOptions, svgs },
+    ...(Object.keys(links).length > 0 ? { links } : {})
+  };
+  const html = renderChangeBook(book, change, renderOptions);
   await mkdir(join(outDir, "dist"), { recursive: true });
   const htmlPath = join(outDir, "dist", "index.html");
   await writeFile(htmlPath, html, "utf8");
