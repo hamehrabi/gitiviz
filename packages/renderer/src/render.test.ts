@@ -764,6 +764,13 @@ describe("architecture view", () => {
     expect(section.querySelector("figure.diagram, figure.diagram-placeholder")).not.toBeNull();
     expect(section.textContent).toContain("Create order endpoint");
     expect(section.textContent).toContain("creates order via");
+    // The relationship list keeps its heading here (howItWorksView folds
+    // the same list under "Derived connections" instead).
+    const headings = Array.from(section.querySelectorAll("h3")).map(
+      (h) => h.textContent
+    );
+    expect(headings).toContain("Connections");
+    expect(section.querySelector("ul.relationships")).not.toBeNull();
   });
 
   it("says not yet written when the systems chapter is not generated", () => {
@@ -778,20 +785,104 @@ describe("architecture view", () => {
 });
 
 describe("how it works view", () => {
-  it("lists how value moves as verb sentences", () => {
+  function narratedFlowsChange(): ChangeManifest {
+    const change = demoChange();
+    change.chapterNarrations = {
+      flows: {
+        summary: "Install the CLI once, then compare any two revisions.",
+        keyPoints: [
+          "Install the plugin.",
+          "Run the compare command.",
+          "Open the book in a browser."
+        ],
+        provenance: "inferred",
+        confidence: 0.9
+      }
+    };
+    return change;
+  }
+
+  it("narrated flows fixture stays schema-valid", () => {
+    expect(validateChangeManifest(narratedFlowsChange()).ok).toBe(true);
+  });
+
+  it("asks the install-and-usage question", () => {
     const doc = parse(renderDemo());
     const section = doc.querySelector("#how-it-works")!;
     expect(section.querySelector("h2")!.textContent).toBe("How it works");
-    expect(section.textContent).toContain(
-      "Create order endpoint —creates order via→ Order service"
+    expect(section.querySelector(".view-sub")!.textContent).toBe(
+      "How do I install and use it?"
     );
   });
 
-  it("is honest when there are no derived flows", () => {
+  it("renders the narrated guide as a ◇ lead plus numbered steps", () => {
+    const change = narratedFlowsChange();
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const section = doc.querySelector("#how-it-works")!;
+    const lead = section.querySelector("p.lead");
+    expect(lead).not.toBeNull();
+    expect(lead!.textContent).toContain(
+      "Install the CLI once, then compare any two revisions."
+    );
+    expect(lead!.querySelector(".prov")!.textContent).toBe("◇");
+    const steps = Array.from(
+      section.querySelectorAll("ol.guide-steps li")
+    ).map((li) => li.textContent);
+    expect(steps).toEqual([
+      "Install the plugin.",
+      "Run the compare command.",
+      "Open the book in a browser."
+    ]);
+  });
+
+  it("moves the relationship dump inside a closed Derived-connections fold", () => {
+    const change = narratedFlowsChange();
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    const section = doc.querySelector("#how-it-works")!;
+    const fold = section.querySelector("details.connections");
+    expect(fold).not.toBeNull();
+    expect(fold!.hasAttribute("open")).toBe(false);
+    expect(fold!.querySelector("summary")!.textContent).toBe("Derived connections");
+    expect(fold!.querySelector("ul.relationships")!.textContent).toContain(
+      "Create order endpoint —creates order via→ Order service"
+    );
+    // The dump lives ONLY inside the fold — never in the default view.
+    expect(section.querySelectorAll("ul.relationships").length).toBe(1);
+    expect(section.querySelectorAll("h3").length).toBe(0);
+  });
+
+  it("points at /gitiviz:init when un-narrated but relationships exist", () => {
+    const doc = parse(renderDemo());
+    const section = doc.querySelector("#how-it-works")!;
+    expect(section.textContent).toContain(
+      "No usage guide narrated yet — run /gitiviz:init."
+    );
+    expect(section.querySelector("p.lead")).toBeNull();
+    expect(section.querySelector("ol.guide-steps")).toBeNull();
+    expect(section.querySelector("details.connections")).not.toBeNull();
+  });
+
+  it("says Not yet written with neither narration nor relationships", () => {
     const change = demoChange();
     change.relationships = [];
     const doc = parse(renderChangeBook(demoBook(change), change));
-    expect(doc.querySelector("#how-it-works")!.textContent).toContain("Not yet written");
+    const section = doc.querySelector("#how-it-works")!;
+    expect(section.textContent).toContain("Not yet written.");
+    expect(section.querySelector("details.connections")).toBeNull();
+  });
+
+  it("escapes hostile narrated guide text", () => {
+    const change = narratedFlowsChange();
+    change.chapterNarrations!.flows!.summary = '<script>alert("guide")</script>';
+    change.chapterNarrations!.flows!.keyPoints = ['"><img src=x onerror=alert(1)>'];
+    const html = renderChangeBook(demoBook(change), change);
+    expect(html).not.toContain('<script>alert("guide")');
+    expect(html).not.toContain("<img src=x");
+    const doc = parse(html);
+    expect(doc.querySelectorAll("script").length).toBe(0);
+    expect(
+      doc.querySelector("#how-it-works ol.guide-steps li")!.textContent
+    ).toBe('"><img src=x onerror=alert(1)>');
   });
 });
 

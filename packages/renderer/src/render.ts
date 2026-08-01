@@ -522,6 +522,12 @@ function entityList(entities: Entity[]): string {
   return `<ul class="entities">${items}</ul>`;
 }
 
+/**
+ * The derived relationship dump as a bare `<ul>` (no heading — each caller
+ * frames it: architectureView under its "Connections" h3, howItWorksView
+ * inside the closed "Derived connections" fold). Empty string when the
+ * manifest derived no relationships.
+ */
 function relationshipList(change: ChangeManifest): string {
   if (change.relationships.length === 0) return "";
   const byId = new Map(change.entities.map((entity) => [entity.id, entity]));
@@ -532,7 +538,7 @@ function relationshipList(change: ChangeManifest): string {
       return `<li>${escHtml(from)} —${escHtml(rel.verb)}→ ${escHtml(to)}</li>`;
     })
     .join("");
-  return `<h3>Connections</h3><ul class="relationships">${items}</ul>`;
+  return `<ul class="relationships">${items}</ul>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -720,11 +726,12 @@ function architectureView(
       })
     : null;
   const anchors = change.entities.flatMap((entity) => entity.evidence ?? []);
+  const relationships = relationshipList(change);
   const evidence =
     `<details><summary>Technical evidence</summary>` +
     (fullGraph === null ? "" : `<figure class="diagram">${fullGraph}</figure>`) +
     entityList(change.entities) +
-    relationshipList(change) +
+    (relationships === "" ? "" : `<h3>Connections</h3>` + relationships) +
     (anchors.length === 0
       ? ""
       : `<ul class="evidence">${anchors.map(anchorLine).join("")}</ul>`) +
@@ -733,13 +740,49 @@ function architectureView(
   return head + lede + hero + evidence;
 }
 
-/** How it works: how value moves — the derived relationship flows. */
+/** The question the How-it-works view answers now that it is a usage guide. */
+const HOW_IT_WORKS_QUESTION = "How do I install and use it?";
+
+/**
+ * How it works: the narrated install-and-usage guide. The flows narration
+ * renders as a ◇ lead plus numbered `ol.guide-steps`; the old derived
+ * relationship dump survives only inside a closed "Derived connections"
+ * fold. Honest fallbacks: narration absent but relationships present →
+ * a pointer at /gitiviz:init above the fold; neither → "Not yet written."
+ */
 function howItWorksView(change: ChangeManifest): string {
-  const head = viewHead("How it works", escHtml(CHAPTER_QUESTIONS.flows));
-  if (change.relationships.length === 0) {
-    return head + `<p class="muted">Not yet written.</p>`;
+  const head = viewHead("How it works", escHtml(HOW_IT_WORKS_QUESTION));
+  const relationships = relationshipList(change);
+  const connections =
+    relationships === ""
+      ? ""
+      : `<details class="connections"><summary>Derived connections</summary>` +
+        relationships +
+        `</details>`;
+  const narration = change.chapterNarrations?.flows;
+  if (narration === undefined) {
+    if (connections === "") {
+      return head + `<p class="muted">Not yet written.</p>`;
+    }
+    return (
+      head +
+      `<p class="muted">No usage guide narrated yet — run /gitiviz:init.</p>` +
+      connections
+    );
   }
-  return head + relationshipList(change);
+  const points = narration.keyPoints ?? [];
+  const steps =
+    points.length === 0
+      ? ""
+      : `<ol class="guide-steps">` +
+        points.map((point) => `<li>${escHtml(point)}</li>`).join("") +
+        `</ol>`;
+  return (
+    head +
+    `<p class="lead">${INFERRED_MARK} ${escHtml(narration.summary)}</p>` +
+    steps +
+    connections
+  );
 }
 
 /** More: the remaining book chapters, each folded until needed. */
@@ -864,6 +907,9 @@ function shellCss(): string {
     // Narrated key points (◇ per item — the glyph is the list marker).
     `ul.keypoints{list-style:none;margin:0.5rem 0 1rem;padding-left:0}`,
     `ul.keypoints li{margin:0.375rem 0}`,
+    // Narrated install/usage guide: the ol numbering IS the affordance.
+    `ol.guide-steps{margin:0.75rem 0 1.25rem;padding-left:1.5rem}`,
+    `ol.guide-steps li{margin:0.5rem 0}`,
     `code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.875em;` +
       `background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}`,
     `ul,ol{margin:0.5rem 0;padding-left:1.5rem}`,
