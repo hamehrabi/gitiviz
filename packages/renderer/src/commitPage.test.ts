@@ -65,7 +65,7 @@ describe("renderCommitPage structure", () => {
     expect(root.classList.contains("cp-page")).toBe(true);
   });
 
-  it("orders content: meta, title, purpose, before/after, diagram, unchanged, back, evidence", () => {
+  it("orders content: meta, title, purpose, before/after, diagram, unchanged, footer, evidence", () => {
     const { root } = parse(renderCommitPage(demoModel(), DIAGRAM_SVG));
     const classes = Array.from(root.children).map(
       (child) => child.classList[0]
@@ -77,7 +77,7 @@ describe("renderCommitPage structure", () => {
       "cp-beforeafter",
       "cp-diagram",
       "cp-unchanged",
-      "cp-back",
+      "cp-footer",
       "cp-evidence"
     ]);
   });
@@ -373,15 +373,77 @@ describe("renderCommitPage sources", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Back link
+// Footer: back link + Discuss & ticket panel
 // ---------------------------------------------------------------------------
 
-describe("renderCommitPage back link", () => {
+describe("renderCommitPage footer", () => {
   it("renders a prominent back link that clears the fragment", () => {
     const { root } = parse(renderCommitPage(demoModel(), null));
     const link = root.querySelector("a.cp-back-link");
     expect(link?.getAttribute("href")).toBe("#");
     expect(link?.textContent).toBe("← All changes");
+  });
+
+  it("keeps the back-link markup byte-identical inside the footer (e2e regex)", () => {
+    const html = renderCommitPage(demoModel(), null);
+    expect(html).toContain(`<a class="cp-back-link" href="#">← All changes</a>`);
+    const { root } = parse(html);
+    expect(root.querySelector(".cp-footer a.cp-back-link")).not.toBeNull();
+  });
+
+  it("shows the Discuss & ticket panel with the per-commit command", () => {
+    const { root } = parse(renderCommitPage(demoModel(), null));
+    const panel = root.querySelector(".cp-footer .cp-discuss");
+    expect(panel).not.toBeNull();
+    expect(panel!.querySelector(".cp-discuss-title")!.textContent).toBe(
+      "Discuss & ticket"
+    );
+    const cmd = panel!.querySelector("code.cp-discuss-cmd");
+    expect(cmd).not.toBeNull();
+    expect(cmd!.textContent).toBe("/gitiviz:discuss ccccccc");
+    // One instruction line, and only one.
+    expect(panel!.querySelectorAll(".cp-discuss-hint").length).toBe(1);
+    expect(
+      panel!.querySelector(".cp-discuss-hint")!.textContent.length
+    ).toBeGreaterThan(0);
+  });
+
+  it("makes the command one-click selectable via user-select:all (no JS)", () => {
+    const rule = commitPageCss.match(/\.cp-discuss-cmd\{[^}]*\}/)?.[0] ?? "";
+    expect(rule).not.toBe("");
+    expect(rule).toContain("-webkit-user-select:all");
+    expect(rule).toContain(";user-select:all");
+  });
+
+  it("omits the panel — back link only — when the unit has no sha", () => {
+    const { root } = parse(renderCommitPage(demoModel({ shortSha: null }), null));
+    const footer = root.querySelector(".cp-footer");
+    expect(footer).not.toBeNull();
+    expect(footer!.querySelector("a.cp-back-link")).not.toBeNull();
+    expect(footer!.querySelector(".cp-discuss")).toBeNull();
+    expect(root.outerHTML).not.toContain("/gitiviz:discuss");
+  });
+
+  it("escapes a hostile sha in the advertised command", () => {
+    const html = renderCommitPage(
+      demoModel({ shortSha: `"><script>alert(1)</script>` }),
+      null
+    );
+    expect(html).not.toContain("<script>alert(1)");
+    const { root } = parse(html);
+    expect(root.querySelector("script")).toBeNull();
+    expect(root.querySelector("code.cp-discuss-cmd")!.textContent).toBe(
+      `/gitiviz:discuss "><script>alert(1)</script>`
+    );
+  });
+
+  it("keeps the footer to one root child so the 8-child budget holds", () => {
+    const { root } = parse(renderCommitPage(demoModel(), DIAGRAM_SVG));
+    const footers = Array.from(root.children).filter((child) =>
+      child.classList.contains("cp-footer")
+    );
+    expect(footers.length).toBe(1);
+    expect(root.children.length).toBeLessThanOrEqual(8);
   });
 });
 

@@ -527,7 +527,7 @@ describe("commit pages (:target navigation)", () => {
     }
   });
 
-  it("orders the page: meta, title, purpose, before/after, diagram, unchanged, back, evidence", () => {
+  it("orders the page: meta, title, purpose, before/after, diagram, unchanged, footer, evidence", () => {
     const doc = parse(renderDemo());
     const page = doc.getElementById("u0")!;
     const kinds = Array.from(page.children).map(
@@ -540,7 +540,7 @@ describe("commit pages (:target navigation)", () => {
       "dl.cp-beforeafter",
       "figure.cp-diagram",
       "details.cp-unchanged",
-      "p.cp-back",
+      "footer.cp-footer",
       "details.cp-evidence"
     ]);
   });
@@ -589,6 +589,30 @@ describe("commit pages (:target navigation)", () => {
       expect(back.getAttribute("href")).toBe("#");
       expect(back.textContent).toBe("← All changes");
     }
+  });
+
+  it("advertises /gitiviz:discuss with each page's own sha in the footer panel", () => {
+    const doc = parse(renderDemo());
+    const cmds = Array.from(
+      doc.querySelectorAll("section.cp-page .cp-footer code.cp-discuss-cmd")
+    ).map((code) => code.textContent);
+    expect(cmds).toEqual(["/gitiviz:discuss ccccccc", "/gitiviz:discuss ddddddd"]);
+    // The panel sits in the same footer as the back link, before the
+    // evidence fold — the ≤8-child budget test above still covers it.
+    const footer = doc.querySelector("#u0 footer.cp-footer")!;
+    expect(footer.querySelector("a.cp-back-link")).not.toBeNull();
+    expect(footer.querySelector(".cp-discuss-title")!.textContent).toBe(
+      "Discuss & ticket"
+    );
+  });
+
+  it("omits the discuss panel for a unit with no commit sha", () => {
+    const change = demoChange();
+    delete change.changeUnits[1]!.commits;
+    const doc = parse(renderChangeBook(demoBook(change), change));
+    expect(doc.querySelector("#u0 .cp-discuss")).not.toBeNull();
+    expect(doc.querySelector("#u1 .cp-discuss")).toBeNull();
+    expect(doc.querySelector("#u1 a.cp-back-link")).not.toBeNull();
   });
 
   it("keeps technical evidence collapsed at the very bottom", () => {

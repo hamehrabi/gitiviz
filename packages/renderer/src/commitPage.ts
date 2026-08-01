@@ -13,9 +13,12 @@
  *      engine — this parameter is the clean insertion point for a future
  *      Mermaid export adapter)
  *   6. collapsed "Unchanged: N components" (omitted when N = 0)
- *   7. prominent "← All changes" back link (href="#": clearing the
- *      fragment un-targets the page, so Home — the default view — returns
- *      and browser Back still works)
+ *   7. footer: prominent "← All changes" back link (href="#": clearing
+ *      the fragment un-targets the page, so Home — the default view —
+ *      returns and browser Back still works) merged with the
+ *      "Discuss & ticket" panel advertising /gitiviz:discuss <sha>
+ *      (user-select:all for one-click select — zero JavaScript; panel
+ *      omitted when the unit has no sha)
  *   8. technical evidence, collapsed at the bottom
  *
  * Ruthless cognitive-load budget: at most 8 direct children on the root
@@ -75,10 +78,14 @@ export const commitPageCss = `
 .cp-unchanged,.cp-evidence{margin:1rem 0;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem 1rem}
 .cp-unchanged>summary,.cp-evidence>summary{cursor:pointer;color:#6b7280;font-size:0.875rem;overflow-wrap:anywhere}
 .cp-unchanged p{margin:0.5rem 0;font-size:0.875rem;color:#6b7280}
-.cp-back{margin:1.5rem 0}
+.cp-footer{margin:1.5rem 0}
 .cp-back-link{display:inline-block;color:#1d4ed8;text-decoration:none;font-weight:600;border:1px solid #bfdbfe;background:#eff6ff;border-radius:6px;padding:0.4375rem 0.875rem}
 .cp-back-link:hover{border-color:#1d4ed8}
 .cp-back-link:focus-visible{outline:2px solid #1d4ed8;outline-offset:2px}
+.cp-discuss{margin:1rem 0 0;padding:0.75rem 1rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb}
+.cp-discuss-title{margin:0 0 0.375rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280}
+.cp-discuss-cmd{-webkit-user-select:all;user-select:all;display:inline-block;font-family:${MONO};font-size:0.8125rem;color:#1f2937;background:#ffffff;border:1px solid #e5e7eb;border-radius:4px;padding:0.25em 0.5em;overflow-wrap:anywhere}
+.cp-discuss-hint{margin:0.375rem 0 0;font-size:0.8125rem;color:#6b7280}
 .cp-ev-title{margin:0.75rem 0 0.25rem;overflow-wrap:anywhere}
 .cp-ev-title code{font-family:${MONO};font-size:0.8125rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}
 .cp-ev-list{list-style:none;margin:0.5rem 0 0.75rem;padding:0}
@@ -160,6 +167,30 @@ function unchangedFold(count: number): string {
     `not touched by this change.</p>` +
     `</details>`
   );
+}
+
+/**
+ * The page footer: the prominent back link merged with the
+ * "Discuss & ticket" panel. The back-link markup is byte-stable — e2e
+ * regex-matches it exactly. The panel advertises the /gitiviz:discuss
+ * command for this commit; `user-select:all` on the <code> is the
+ * one-click-select affordance (no JavaScript, no copy button). When the
+ * unit has no sha there is nothing to discuss — the panel is omitted and
+ * only the back link renders. The sha is repo-derived hostile input and
+ * escapes on output.
+ */
+function footerSection(unit: CommitPageModel): string {
+  const back = `<a class="cp-back-link" href="#">← All changes</a>`;
+  const panel =
+    unit.shortSha === null
+      ? ""
+      : `<div class="cp-discuss">` +
+        `<p class="cp-discuss-title">Discuss &amp; ticket</p>` +
+        `<code class="cp-discuss-cmd">${escHtml(`/gitiviz:discuss ${unit.shortSha}`)}</code>` +
+        `<p class="cp-discuss-hint">Select the command, then run it in Claude Code ` +
+        `from this repository to ask questions or open a GitHub ticket.</p>` +
+        `</div>`;
+  return `<footer class="cp-footer">${back}${panel}</footer>`;
 }
 
 /** Sources longer than this fold the tail into a nested "+N more files". */
@@ -299,7 +330,7 @@ export function renderCommitPage(
     `</dl>` +
     diagramFigure(diagramSvg, extras) +
     unchangedFold(unit.unchangedCount) +
-    `<p class="cp-back"><a class="cp-back-link" href="#">← All changes</a></p>` +
+    footerSection(unit) +
     evidenceFold(unit, extras) +
     `</section>`
   );
