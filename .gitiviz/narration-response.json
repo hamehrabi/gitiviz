@@ -1,0 +1,306 @@
+{
+  "projectSummary": "Gitiviz turns a project's Git history into a small illustrated website that explains, in plain English, what changed and why it matters — so someone who never reads code can still follow the work. It runs entirely on your own machine against your local history, and produces one self-contained HTML file with no scripts in it, which you can email, attach to a ticket, or open with your internet off. Its central promise is honesty: facts are pulled mechanically out of Git and the source tree and marked verified, sentences written by the AI are marked as interpretation, and a validator refuses any claim or diagram that the evidence does not actually support.",
+
+  "chapters": {
+    "purpose": {
+      "summary": "AI assistants now write code faster than any team can review it. Gitiviz closes that gap: after every change, it builds an illustrated, plain-language book of what the software now does differently. The facts are extracted mechanically and marked verified; the explanations are written by the AI and honestly marked as interpretation, so a reader always knows which is which.",
+      "keyPoints": [
+        "One command produces a complete offline change book — no server, no account, no setup",
+        "Every commit becomes a card: click it for the story, a before/after, and a simple picture",
+        "Diagrams are checked against real files before they render — no invented boxes",
+        "Verified facts (✓) and AI interpretation (◇) are always visibly separated",
+        "Non-technical readers are the audience: the file-level detail is folded away for developers"
+      ]
+    },
+    "systems": {
+      "summary": "Five parts work in a row. You start it from Claude Code with a slash command. A launcher runs the bundled engine, which reads Git and extracts hard facts. Those facts are grouped into meaningful changes, and a validation gate checks every sentence and every diagram the AI proposes. What survives is rendered into one safe HTML file. Finally, the book links back to your real repository and pulls in any tickets you raised from it.",
+      "keyPoints": [
+        "Entry: slash commands, a launcher that picks Node or Docker, and a hook that fires after each commit",
+        "Facts: reads commits and diffs and groups them into chapters — it never runs the repository's code",
+        "Honesty gate: rejects any AI claim or diagram anchor that the evidence does not back",
+        "Book: one offline HTML file, zero JavaScript, with diagrams drawn ahead of time and sanitized",
+        "Links and tickets: source links validated against your repo's real origin, plus an Issues tab"
+      ]
+    },
+    "flows": {
+      "summary": "You need Claude Code, Git, and either Node.js 20 or later or Docker — whichever you already have. Nothing is installed into your project and nothing is downloaded at run time; the engine ships pre-bundled with the plugin. Budget about two minutes for the whole thing.",
+      "keyPoints": [
+        "In Claude Code, add the catalog: /plugin marketplace add hamehrabi/gitiviz",
+        "Install the plugin: /plugin install gitiviz@gitiviz — then restart Claude Code if the commands do not appear",
+        "Open Claude Code inside any project folder and run /gitiviz:init to build the book from your recent history",
+        "Open the result at .gitiviz/dist/index.html, or just ask Claude for /gitiviz:open",
+        "Add .gitiviz/ to your .gitignore — the book is generated output and rebuilds itself after every commit"
+      ]
+    }
+  },
+
+  "architectureDiagram": {
+    "clusters": [
+      { "id": "entry", "title": "How you start it", "tone": "blue" },
+      { "id": "facts", "title": "Reading the repository", "tone": "amber" },
+      { "id": "gate", "title": "The honesty gate", "tone": "violet" },
+      { "id": "book", "title": "Building the book", "tone": "mint" },
+      { "id": "act", "title": "Reading and acting on it", "tone": "rose" }
+    ],
+    "nodes": [
+      { "id": "initcmd", "cluster": "entry", "humanLabel": "Init command", "role": "starts the story loop", "file": "commands/init.md" },
+      { "id": "talkcmd", "cluster": "entry", "humanLabel": "Discuss command", "role": "ask about one change", "file": "commands/discuss.md" },
+      { "id": "launcher", "cluster": "entry", "humanLabel": "Launcher", "role": "runs it with Node or Docker", "file": "plugins/claude-code/scripts/run.sh" },
+      { "id": "hook", "cluster": "entry", "humanLabel": "Auto-story hook", "role": "wakes up after every commit", "file": "plugins/claude-code/hooks/on-commit" },
+      { "id": "bundler", "cluster": "entry", "humanLabel": "Bundler", "role": "ships the engine ready to run", "file": "build/bundle.mjs" },
+
+      { "id": "compare", "cluster": "facts", "humanLabel": "Range reader", "role": "turns commits into facts", "file": "packages/cli/src/commands/compare.ts" },
+      { "id": "units", "cluster": "facts", "humanLabel": "Change grouper", "role": "one chapter per real change", "file": "packages/core/src/changeUnits.ts" },
+      { "id": "builder", "cluster": "facts", "humanLabel": "Book assembler", "role": "lays the chapters out", "file": "packages/core/src/book.ts" },
+      { "id": "contract", "cluster": "facts", "humanLabel": "Fact contract", "role": "the shape facts must fit", "file": "spec/change-manifest.schema.json" },
+
+      { "id": "narration", "cluster": "gate", "humanLabel": "Claim validator", "role": "rejects unbacked claims", "file": "packages/core/src/narration.ts" },
+      { "id": "apply", "cluster": "gate", "humanLabel": "Story merger", "role": "folds approved prose in", "file": "plugins/claude-code/scripts/apply-narration.mjs" },
+
+      { "id": "render", "cluster": "book", "humanLabel": "Book renderer", "role": "one scriptless HTML file", "file": "packages/renderer/src/render.ts" },
+      { "id": "page", "cluster": "book", "humanLabel": "Change pages", "role": "plain English per change", "file": "packages/renderer/src/commitPage.ts" },
+      { "id": "diagram", "cluster": "book", "humanLabel": "Diagram compiler", "role": "specs become pictures", "file": "packages/renderer/src/mermaid.ts" },
+      { "id": "prerender", "cluster": "book", "humanLabel": "Diagram drawer", "role": "draws them all in one pass", "file": "packages/cli/src/mermaid-prerender.ts" },
+      { "id": "sanitize", "cluster": "book", "humanLabel": "Picture sanitizer", "role": "strips anything runnable", "file": "packages/renderer/src/svgSanitizeLite.ts" },
+
+      { "id": "links", "cluster": "act", "humanLabel": "Source links", "role": "only to your real repo", "file": "packages/renderer/src/links.ts" },
+      { "id": "issuesview", "cluster": "act", "humanLabel": "Issues tab", "role": "tickets raised from the book", "file": "packages/renderer/src/issues.ts" },
+      { "id": "issuefetch", "cluster": "act", "humanLabel": "Ticket fetcher", "role": "reads your GitHub issues", "file": "packages/cli/src/issues.ts" }
+    ],
+    "edges": [
+      { "from": "initcmd", "to": "launcher", "verb": "invokes" },
+      { "from": "hook", "to": "launcher", "verb": "re-runs after each commit" },
+      { "from": "bundler", "to": "launcher", "verb": "packages the engine for" },
+      { "from": "launcher", "to": "compare", "verb": "runs" },
+      { "from": "compare", "to": "units", "verb": "groups the diff into" },
+      { "from": "units", "to": "builder", "verb": "becomes chapters in" },
+      { "from": "contract", "to": "builder", "verb": "validates" },
+      { "from": "builder", "to": "narration", "verb": "asks the AI through" },
+      { "from": "narration", "to": "apply", "verb": "enforced by" },
+      { "from": "apply", "to": "render", "verb": "hands approved text to" },
+      { "from": "render", "to": "page", "verb": "builds" },
+      { "from": "render", "to": "diagram", "verb": "draws with" },
+      { "from": "diagram", "to": "prerender", "verb": "rendered by" },
+      { "from": "prerender", "to": "sanitize", "verb": "cleaned by" },
+      { "from": "sanitize", "to": "render", "verb": "returns safe pictures to" },
+      { "from": "page", "to": "links", "verb": "links evidence via" },
+      { "from": "page", "to": "talkcmd", "verb": "points readers at" },
+      { "from": "talkcmd", "to": "issuefetch", "verb": "files tickets read by" },
+      { "from": "issuefetch", "to": "issuesview", "verb": "feeds" },
+      { "from": "issuesview", "to": "render", "verb": "shown in" }
+    ]
+  },
+
+  "changeUnits": [
+    {
+      "id": "797c88f46bcd",
+      "humanTitle": "The AI may propose diagrams — but cannot invent them",
+      "summary": "Claude can now suggest the diagrams itself: the groups, the boxes, the arrows between them. It hands them over as plain structured data rather than as drawing instructions, and every box that names a file is checked against the real evidence. A box pointing at a file that does not exist is rejected outright, along with duplicate boxes, arrows leading nowhere, and oversized diagrams. The same change opened slots for a written project summary and the book's opening chapters.",
+      "beforeDescription": "Diagrams could only be assembled mechanically from the file list, which capped how meaningful they could ever be, and the book had no place to put a written project summary.",
+      "afterDescription": "The AI proposes concept-level maps and a project summary; a validator checks every reference against real evidence and stamps what survives as interpretation, never as fact.",
+      "userImpact": "You get diagrams that explain the product rather than the file tree, with a hard guarantee that nothing in them was made up.",
+      "storyDiagram": {
+        "nodes": [
+          { "id": "ai", "humanLabel": "Claude", "role": "proposes a diagram" },
+          { "id": "gate", "humanLabel": "The validator", "role": "checks every file is real", "file": "packages/core/src/narration.ts" },
+          { "id": "book", "humanLabel": "The book", "role": "renders only what passed" }
+        ],
+        "edges": [
+          { "from": "ai", "to": "gate", "verb": "submits to" },
+          { "from": "gate", "to": "book", "verb": "approves for" }
+        ]
+      }
+    },
+    {
+      "id": "6a5618551c2e",
+      "humanTitle": "One command to start — then the book keeps itself current",
+      "summary": "This is where Gitiviz became a product you run rather than a library you call. A single command reads your recent history and builds the whole book. After that, a hook watches for commits: every time Claude Code commits in a project that already has a book, the facts refresh and that commit gets its own story written automatically. In projects that never opted in, the hook does nothing at all.",
+      "beforeDescription": "There was no starting command and no upkeep — you had to drive the pipeline by hand, and the book went stale the moment you committed again.",
+      "afterDescription": "One command builds the book; from then on each new commit arrives with its own story card, with no further action from you.",
+      "userImpact": "You set it up once. The book stays accurate on its own, so it is still worth reading a month later.",
+      "storyDiagram": {
+        "nodes": [
+          { "id": "cmd", "humanLabel": "The init command", "role": "builds the first book", "file": "commands/init.md" },
+          { "id": "commit", "humanLabel": "Your next commit", "role": "happens as normal" },
+          { "id": "hook", "humanLabel": "The watcher", "role": "notices and refreshes", "file": "plugins/claude-code/hooks/on-commit" },
+          { "id": "book", "humanLabel": "The book", "role": "gains a new story card" }
+        ],
+        "edges": [
+          { "from": "cmd", "to": "book", "verb": "creates" },
+          { "from": "commit", "to": "hook", "verb": "wakes" },
+          { "from": "hook", "to": "book", "verb": "adds a chapter to" }
+        ]
+      }
+    },
+    {
+      "id": "f60a9f6bd29a",
+      "humanTitle": "Diagrams that look like a real architecture map",
+      "summary": "The pictures grew up. Instead of a scatter of file names, a diagram now shows colour-coded groups of related parts, each box carrying a human name, what it does, and the file behind it, with arrows labelled by what actually happens between them. Boxes can be clicked through to the real file, but only when that file is genuinely in the evidence and the link resolves to your configured repository. The big entity graphs moved out of sight into a collapsed technical section.",
+      "beforeDescription": "Diagrams were flat, mechanical graphs of files and imports — technically true, but close to unreadable for anyone not already familiar with the code.",
+      "afterDescription": "Grouped, colour-coded concept maps that read like an architecture drawing, with the raw file graph tucked into a fold for developers who want it.",
+      "userImpact": "A non-developer can look at the Architecture page and come away knowing roughly how the product is put together."
+    },
+    {
+      "id": "eadb7593fdb8",
+      "humanTitle": "The shipped copy caught up with the code",
+      "summary": "Gitiviz ships its engine as pre-built files so that installing the plugin never has to download anything. Those built files have to be regenerated whenever the source changes, and this change did exactly that — no behaviour changed, the shipped copy simply matched the code again.",
+      "beforeDescription": "The pre-built engine bundled with the plugin was older than the source it came from.",
+      "afterDescription": "The bundled engine matches the current source, so an install gets the current behaviour.",
+      "userImpact": "Nothing visible — this is the routine step that keeps a fresh install from behaving differently to the source."
+    },
+    {
+      "id": "77e9617ea3ed",
+      "humanTitle": "Pictures actually get drawn — with three ways to try",
+      "summary": "Designing the diagrams was one thing; getting them drawn on every machine was another. This change wired drawing into the build with three fallbacks in order: draw them locally if the drawing library is available, otherwise use the official drawing tool in a Docker container, otherwise fall back to the simple built-in drawer and say so honestly on the page. Whichever route runs, every finished picture is scrubbed of anything executable before it can reach the page.",
+      "beforeDescription": "Diagram specs existed but were not reliably turned into pictures in the final book, and there was no stated plan for machines missing the drawing tools.",
+      "afterDescription": "A three-step chain draws the diagrams on whatever the machine has, and openly labels the result when it had to fall back to the simpler drawer.",
+      "userImpact": "You get pictures on any machine — and when they are the plainer kind, the book tells you rather than pretending."
+    },
+    {
+      "id": "313268bc2e0f",
+      "humanTitle": "Pinned the build's ingredient list",
+      "summary": "The project recorded the exact versions of the drawing libraries it depends on, in the file that pins every dependency down to a precise version. This is what lets the automated build install the same thing every time instead of quietly picking up newer versions.",
+      "beforeDescription": "The drawing libraries were used without pinned versions recorded, so the automated build could not install a guaranteed-identical set.",
+      "afterDescription": "Exact versions are recorded and committed, so every build — yours, a colleague's, the automated one — installs the same thing.",
+      "userImpact": "Invisible day to day, but it is why the build behaves the same on your machine as it does in the project's own checks."
+    },
+    {
+      "id": "4f07f2193659",
+      "humanTitle": "Building a book got roughly four times faster",
+      "summary": "Building a book over twenty commits was taking around twenty seconds, and the team measured where the time actually went. It was not the analysis — that part takes under a second. It was the pictures: each diagram was starting its own container and its own headless browser, once per diagram. Now every missing diagram is drawn together in a single pass, and diagrams whose picture is already up to date are skipped entirely.",
+      "beforeDescription": "One heavy container start per diagram — twenty-one diagrams meant twenty-one cold starts, about twenty seconds on this machine and, on slower ones, closer to fifty minutes.",
+      "afterDescription": "All missing diagrams are drawn in one pass, and fresh ones are left alone: about four and a half seconds cold, just over one second on a repeat run.",
+      "userImpact": "Running Gitiviz over a busy branch now feels immediate instead of like a coffee break — and it no longer gets slower the more commits you cover.",
+      "storyDiagram": {
+        "nodes": [
+          { "id": "before", "humanLabel": "Before", "role": "one container per diagram" },
+          { "id": "batch", "humanLabel": "The batching step", "role": "collects every missing picture", "file": "packages/cli/src/mermaid-prerender.ts" },
+          { "id": "after", "humanLabel": "After", "role": "one container for all of them" },
+          { "id": "skip", "humanLabel": "Repeat runs", "role": "skip pictures already fresh" }
+        ],
+        "edges": [
+          { "from": "before", "to": "batch", "verb": "replaced by" },
+          { "from": "batch", "to": "after", "verb": "renders as" },
+          { "from": "after", "to": "skip", "verb": "then" }
+        ]
+      }
+    },
+    {
+      "id": "35baca4d4da8",
+      "humanTitle": "Told the AI to write a getting-started guide, not a tour",
+      "summary": "One of the book's chapters was being written as an abstract description of how data moves through the system — accurate, and useless to a newcomer. Every command that writes narration was re-pointed at a different target: write the steps someone actually types to install, configure, and first run the project, taken from its README and package files. And if a repository genuinely offers no such steps, leave the chapter out rather than invent one.",
+      "beforeDescription": "The chapter read as an internal data-flow tour, which answered a question most readers were not asking.",
+      "afterDescription": "The same slot is written as an ordered install-and-first-run walkthrough, sourced from the project's own documentation — or omitted entirely when there is nothing honest to say.",
+      "userImpact": "The 'How do I use this?' page now answers that question, and never fabricates instructions when a project has none."
+    },
+    {
+      "id": "a648d4e6140b",
+      "humanTitle": "Each change now remembers which files it touched",
+      "summary": "Every non-grouped change stores the sorted list of files that commit modified — including both names when a file was renamed — as part of its evidence. This is the raw material the Sources list on each change page displays. Very large commits are capped at five hundred files, and when that cap bites, the book says so instead of silently truncating.",
+      "beforeDescription": "A change's story knew which parts of the system it affected, but not the specific files, so there was nothing concrete to link a reader to.",
+      "afterDescription": "Each change carries its own file list as evidence, honestly capped and honestly labelled when the cap applies.",
+      "userImpact": "This is the groundwork for the clickable Sources list — a developer reading a story can jump straight to the code behind it."
+    },
+    {
+      "id": "23fc25994262",
+      "humanTitle": "The book learned where your repository lives",
+      "summary": "The part that builds the book now passes along your repository's web address, its origin, and the list of origins considered safe. It reuses the same values the clickable diagram boxes already relied on — the address of your repo, pinned to the exact commit being described.",
+      "beforeDescription": "The renderer knew nothing about where the repository lives on the web, so it could not build a link to any file.",
+      "afterDescription": "The repository's web address and its safety rules are handed to the renderer, ready for the Sources links to use.",
+      "userImpact": "Half of the clickable-filenames feature — this side supplies the address, the other side draws the links."
+    },
+    {
+      "id": "82dde7a16e42",
+      "humanTitle": "Ask questions about a change, or turn it into a ticket",
+      "summary": "Two new commands. One opens a conversation about a single change: it loads that change's story plus the real code difference and answers your questions from that evidence only, raising a ticket just if you ask for one. The other is the one-shot version — you supply a title and it files the issue. Both write the issue text to a file rather than passing it through a command line, label it so it is easy to find, and report back the address the ticket actually landed at. The permissions granted are deliberately narrow: these commands can create an issue and a label, and nothing else.",
+      "beforeDescription": "The book could explain a change but was a dead end — noticing a problem meant leaving and re-explaining it somewhere else.",
+      "afterDescription": "You can interrogate a change against its real evidence, and turn the answer into a labelled GitHub issue without leaving the conversation.",
+      "userImpact": "Reading the book becomes actionable: spot something, ask about it, file it — all in one place.",
+      "storyDiagram": {
+        "nodes": [
+          { "id": "read", "humanLabel": "You read a change", "role": "and have a question" },
+          { "id": "discuss", "humanLabel": "The discuss command", "role": "answers from the real diff", "file": "commands/discuss.md" },
+          { "id": "ticket", "humanLabel": "The ticket command", "role": "files it on GitHub", "file": "commands/ticket.md" },
+          { "id": "issue", "humanLabel": "A labelled issue", "role": "with a link back" }
+        ],
+        "edges": [
+          { "from": "read", "to": "discuss", "verb": "asks" },
+          { "from": "discuss", "to": "ticket", "verb": "escalates to" },
+          { "from": "ticket", "to": "issue", "verb": "creates" }
+        ]
+      }
+    },
+    {
+      "id": "79a9791d0ad6",
+      "humanTitle": "Dropped the raw diagram code from the page",
+      "summary": "Each picture used to carry a collapsible panel containing the text that generated it. That panel is gone: the pictures now carry their own provenance, and the underlying source files are written out alongside the book for anyone who wants them.",
+      "beforeDescription": "Every diagram came with a fold containing its raw generating code, which added weight to the page and served almost no reader.",
+      "afterDescription": "The page carries the picture only; the generating source lives next to the book on disk for anyone who needs it.",
+      "userImpact": "A cleaner, lighter page — the raw material is still available, just not in your way."
+    },
+    {
+      "id": "20180a089a73",
+      "humanTitle": "Click a filename, land on the real file",
+      "summary": "The technical evidence fold on each change page ends with a Sources list: the first ten files the change touched, each a link to that exact file on your repository host, with the rest tucked behind a 'more files' fold. A filename only becomes a link when it passes every check — it must be in the evidence, the address must be well-formed, and it must resolve to the repository origin you configured. Anything that fails stays plain text rather than becoming a link somewhere unexpected.",
+      "beforeDescription": "The evidence fold listed file paths as inert text; following one up meant finding it yourself.",
+      "afterDescription": "Validated, clickable source links straight to the real files — with anything that fails validation quietly staying unlinked.",
+      "userImpact": "Developers can go from a plain-English story to the exact code in one click, and a hostile repository cannot use those links to send you somewhere else."
+    },
+    {
+      "id": "0d3b420d4109",
+      "humanTitle": "Your tickets come back into the book",
+      "summary": "When you have the GitHub command line tool and a remote configured, Gitiviz fetches the issues it labelled and saves them next to the book. It is strictly best-effort: skipped when the tooling is missing, skipped on request, and a failed fetch keeps whatever it had before rather than breaking the build. The reading side is deliberately paranoid, because a hostile repository could commit a fake list — there are size limits, entry limits, bad entries are dropped, and a malformed file produces nothing rather than an error.",
+      "beforeDescription": "Tickets raised from the book vanished into GitHub; the book had no idea they existed.",
+      "afterDescription": "Labelled issues are fetched and carried into the book, defensively, without ever being able to break a build.",
+      "userImpact": "The loop closes: what you raised from a change shows up next to the change that prompted it."
+    },
+    {
+      "id": "d3c72151acc6",
+      "humanTitle": "The Overview page finally says what the project is",
+      "summary": "Two written slots that had been sitting unused now render. The project summary leads the Overview page as an opening paragraph, and the 'why it exists' points appear as a short list right beneath it — both marked as interpretation. When a slot has not been written, nothing appears at all, so a book built without narration stays entirely free of interpretation marks.",
+      "beforeDescription": "The Overview opened with a mechanical comparison line; the written summary existed in the data but was never displayed.",
+      "afterDescription": "A plain-English opening paragraph and a short 'why it exists' list, with honest silence when they have not been written.",
+      "userImpact": "The first page a reader lands on now tells them what the project actually is."
+    },
+    {
+      "id": "6861de228f16",
+      "humanTitle": "How it works reads like instructions, not a wiring diagram",
+      "summary": "The page now answers 'How do I install and use it?' with a short lead paragraph and numbered steps. The old machine-derived list of connections between parts survives, but only inside a closed fold for anyone curious. The fallbacks stay honest: if the connections exist but no guide has been written, the page points you at the command that writes one; if there is neither, it plainly says the chapter has not been written yet.",
+      "beforeDescription": "The page dumped a derived list of relationships between internal parts — accurate, and not what anyone opening 'How it works' was looking for.",
+      "afterDescription": "Numbered install-and-use steps up front, the derived connections folded away, and honest wording whenever either is missing.",
+      "userImpact": "Someone new to the project can follow the page and get it running."
+    },
+    {
+      "id": "508b2b0ddd8f",
+      "humanTitle": "Every change page tells you how to ask about it",
+      "summary": "The bottom of each change page gained a small panel showing the exact command to open a conversation about that specific change, in a code box you can select with one click. There is no JavaScript involved — the selection behaviour is pure styling. Changes without a commit reference show only the back link, and the reference itself is escaped on the way out because it comes from the repository and is treated as untrusted.",
+      "beforeDescription": "The commands for discussing or ticketing a change existed, but nothing in the book told you they did or which reference to use.",
+      "afterDescription": "Each change page ends with its own ready-to-copy command and a line explaining what it does.",
+      "userImpact": "The path from 'this looks wrong' to 'I asked about it' is now one click and one paste."
+    },
+    {
+      "id": "b229418e4f27",
+      "humanTitle": "A new Issues tab in the book",
+      "summary": "The fetched tickets get their own view: one card per issue showing its number, an open or closed marker, the date, and the title. A card becomes a link only when its address is safe and matches the repository you configured — otherwise it stays a plain, unclickable card. With no tickets yet, the tab says so and explains, in one honest line, where the list comes from.",
+      "beforeDescription": "Fetched tickets were carried into the book's data but had nowhere to appear.",
+      "afterDescription": "A dedicated Issues tab in the sidebar, with linkable cards, a state marker, and an honest empty state.",
+      "userImpact": "You can see at a glance everything the team raised from this book, without leaving it."
+    },
+    {
+      "id": "8c653e0f630c",
+      "humanTitle": "Six parallel workstreams shipped together",
+      "summary": "Several strands of work had been landing in halves — one side in the renderer, the matching side in the command layer — deliberately, so that neither half would break the build on its own. This change joined them up, tightened the type checking on the boundary between them now that both sides carried the agreed fields, and refreshed the shipped pre-built engine so an install gets all six strands at once.",
+      "beforeDescription": "Six features existed as matched halves across the codebase, with the shipped engine older than all of them.",
+      "afterDescription": "The halves are joined, the boundary between them is type-checked properly, and the shipped engine carries the lot.",
+      "userImpact": "Installing or updating Gitiviz now gets you every one of these improvements together, not a partial set."
+    },
+    {
+      "id": "ea0ffa849eef",
+      "humanTitle": "A quick start anyone can follow",
+      "summary": "The README was rewritten so its opening is aimed at someone who is not a developer: what Gitiviz is in one sentence, what you need, the two lines you type to install it, the one command you run, and what each part of the resulting book shows you. All the internal detail — the fact and narration split, the validation guarantees, the security posture, how to work on Gitiviz itself — still exists, moved below a clear 'For engineers' line.",
+      "beforeDescription": "The README opened with architecture and guarantees, which meant a non-technical reader had to wade through internals before finding out how to install it.",
+      "afterDescription": "A five-step plain-English quick start first; every engineering detail preserved, just moved below.",
+      "userImpact": "A project manager or designer can install Gitiviz and read their first book without asking a developer for help."
+    }
+  ]
+}

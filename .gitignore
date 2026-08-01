@@ -2,4 +2,9 @@ node_modules/
 .claude/settings.local.json
 dist/
 *.tsbuildinfo
-.gitiviz/
+# Generated book output is regenerable — but the narration is curated work
+# (project summary, chapter text, per-commit stories, the architecture diagram
+# spec). Commit that so a fresh clone renders the same book. See
+# docs/decisions/0001-committed-artifacts.md.
+.gitiviz/*
+!.gitiviz/narration-response.json

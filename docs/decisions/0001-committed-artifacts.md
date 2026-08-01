@@ -30,9 +30,19 @@ Separately, running gitiviz produces per-repo output under `.gitiviz/`
    survives, so a runtime dependency can never sneak into the committed
    scripts.
 
-2. **Generated output under `.gitiviz/` is never committed.** It is
-   derived, per-comparison, per-repo data; `.gitignore` excludes it here, and
-   the plugin writes it into the *analyzed* repo's working tree, not this one.
+2. **Generated output under `.gitiviz/` is never committed — except the
+   narration.** Manifests, `narration-request.json`, `mermaid/`, `issues.json`
+   and `dist/` are derived per-comparison data and stay ignored. But
+   `.gitiviz/narration-response.json` **is committed**: it is curated work
+   product (project summary, chapter text, per-commit stories, and the
+   architecture diagram spec), not a derivation. Without it a fresh clone
+   renders a *different book* — the code is identical, but each machine's
+   agent writes its own prose and its own diagram. Committing it makes the
+   book reproducible and reviewable, and lets narration improvements land
+   through pull requests like any other content.
+
+   *(Amended 2026-08-02 after observing exactly this: the same commit rendered
+   different architecture diagrams on two machines.)*
 
 3. **CI enforces bundle freshness.** The workflow reruns `pnpm bundle` and
    fails on `git diff --exit-code plugins/`, so a change to `packages/`
