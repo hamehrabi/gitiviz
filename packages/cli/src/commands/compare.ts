@@ -62,6 +62,7 @@ import {
   type MermaidRenderOptions
 } from "@gitiviz/renderer";
 import { prerenderMermaidDiagrams } from "../mermaid-prerender.js";
+import { readIssues } from "../issues.js";
 import { resolveRepoOrigin } from "../repo-origin.js";
 
 /** Spec version stamped on every manifest this CLI generates. */
@@ -323,6 +324,11 @@ export async function renderToDist(options: RenderToDistOptions): Promise<void> 
     ...(allowedOrigins.length > 0 ? { allowedOrigins } : {})
   };
 
+  // Issues fetched host-side by the launcher (defensively re-validated —
+  // a hostile repo can commit its own issues.json). null = no file/garbage:
+  // omit the option; [] is an honest "no tickets yet" the renderer shows.
+  const issues = await readIssues(outDir);
+
   // Built as a plain object (not an inline literal) so the CLI keeps
   // compiling while the renderer's RenderOptions catches up with the
   // links/issues contract fields.
@@ -330,7 +336,8 @@ export async function renderToDist(options: RenderToDistOptions): Promise<void> 
     renderDiagram: compileDiagram,
     ...(options.repoName !== undefined ? { repoName: options.repoName } : {}),
     mermaid: { ...mermaidOptions, svgs },
-    ...(Object.keys(links).length > 0 ? { links } : {})
+    ...(Object.keys(links).length > 0 ? { links } : {}),
+    ...(issues !== null ? { issues } : {})
   };
   const html = renderChangeBook(book, change, renderOptions);
   await mkdir(join(outDir, "dist"), { recursive: true });

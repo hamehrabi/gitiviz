@@ -138,10 +138,17 @@ describe("e2e: manifests", () => {
 
 describe("e2e: HTML dashboard structure", () => {
   it("has a home card per meaningful change; grouped commits get no card", () => {
-    // Sidebar tab nav: the five views, no per-commit tabs.
+    // Sidebar tab nav: the six views, no per-commit tabs.
     const nav = html.match(/<nav[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? "";
     expect(nav).not.toBe("");
-    for (const tab of ["#home", "#overview", "#architecture", "#how-it-works", "#more"]) {
+    for (const tab of [
+      "#home",
+      "#overview",
+      "#architecture",
+      "#how-it-works",
+      "#issues",
+      "#more"
+    ]) {
       expect(nav).toContain(`href="${tab}"`);
     }
     expect(nav).not.toContain("fixup!");
@@ -154,8 +161,15 @@ describe("e2e: HTML dashboard structure", () => {
     // Type tags derive from the conventional-commit prefix.
     expect(html).toContain(`>Feature</span>`);
     expect(html).toContain(`>Housekeeping</span>`);
-    // The five view sections, home last (the CSS default-view technique).
-    for (const id of ["overview", "architecture", "how-it-works", "more", "home"]) {
+    // The six view sections, home last (the CSS default-view technique).
+    for (const id of [
+      "overview",
+      "architecture",
+      "how-it-works",
+      "issues",
+      "more",
+      "home"
+    ]) {
       expect(html).toContain(`<section id="${id}">`);
     }
     expect(html).not.toContain(`cd-type-fixup`);
@@ -230,4 +244,46 @@ describe("e2e: honest provenance labeling", () => {
     expect(narratedHtml).toContain("◇");
     expect(narratedHtml).toContain("AI interpretation");
   }, 60_000);
+});
+
+describe("e2e: hostile issues.json stays inert", () => {
+  // The out dir lives inside the analyzed repo, so a hostile repo can ship
+  // a COMMITTED issues.json. The reader drops garbage entries and the
+  // renderer escapes + origin-validates whatever survives.
+  it("drops garbage entries, escapes titles, and never links javascript:", async () => {
+    const hostileOut = await mkdtemp(join(tmpdir(), "gitiviz-e2e-issues-"));
+    await writeFile(
+      join(hostileOut, "issues.json"),
+      JSON.stringify([
+        {
+          number: 1,
+          title: "<img src=x onerror=alert(1)>",
+          state: 'open"><script>alert(2)</script>',
+          url: "javascript:alert(3)",
+          createdAt: "2026-01-01T00:00:00Z"
+        },
+        { number: "2", title: "dropped: number is a string", state: "open", url: "https://github.com/acme/demo-shop/issues/2", createdAt: "2026-01-02" },
+        "garbage",
+        null
+      ]),
+      "utf8"
+    );
+    const hostileIo = captureIo();
+    expect(
+      await runCli(
+        ["compare", "main", DEMO_FEATURE_BRANCH, "--repo", repo, "--out", hostileOut],
+        hostileIo
+      ),
+      hostileIo.errText()
+    ).toBe(0);
+    const hostileHtml = await readFile(join(hostileOut, "dist", "index.html"), "utf8");
+    // The surviving hostile title renders escaped, never raw.
+    expect(hostileHtml).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(hostileHtml).not.toContain("<img src=x onerror=alert(1)>");
+    expect(hostileHtml).not.toContain("<script");
+    // A javascript: url must never become a link, on any surface.
+    expect(hostileHtml).not.toMatch(/href\s*=\s*["']?javascript:/i);
+    // Dropped entries leave no trace.
+    expect(hostileHtml).not.toContain("dropped: number is a string");
+  }, 120_000);
 });

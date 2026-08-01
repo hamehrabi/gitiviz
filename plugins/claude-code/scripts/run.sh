@@ -35,6 +35,31 @@ renders_book() {
   esac
 }
 
+# Issues tab, host side: refresh <out>/issues.json from GitHub before the
+# CLI runs (`gh` lives on the host only — never in the CLI, bundles, or the
+# container). Strictly best-effort: every guard falls through silently and
+# a failed fetch KEEPS the previous issues.json, so the book still builds
+# offline. GITIVIZ_SKIP_ISSUES=1 opts out entirely (hook latency).
+fetch_issues() {
+  renders_book "${1-}" || return 0
+  if [ -n "${GITIVIZ_SKIP_ISSUES:-}" ]; then return 0; fi
+  command -v gh >/dev/null 2>&1 || return 0
+  command -v git >/dev/null 2>&1 || return 0
+  # gh resolves the repo from the origin remote; without one there is
+  # nothing to fetch from (also keeps fixture/offline repos hermetic).
+  git remote get-url origin >/dev/null 2>&1 || return 0
+  mkdir -p "$OUT_DIR" 2>/dev/null || return 0
+  local tmp="$OUT_DIR/issues.json.tmp"
+  # tmp+mv: issues.json is only ever replaced by a COMPLETE gh response.
+  if gh issue list --label gitiviz --state all --limit 100 \
+    --json number,title,state,url,createdAt >"$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$OUT_DIR/issues.json" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
 # Host-side chain link (b): render the compiled .mmd sources through the
 # official mermaid-cli image with the CLI-written shared config. ONE
 # container renders every pending diagram (a markdown batch — one
@@ -90,6 +115,10 @@ render_mermaid_cli() {
   fi
   [ "$rendered" -gt 0 ]
 }
+
+# The issue fetch must happen BEFORE dispatch: the host-node path execs
+# and never returns, and the Docker fallback cannot reach `gh`.
+fetch_issues "${1-}" || true
 
 if command -v node >/dev/null 2>&1; then
   # Host Node: the CLI runs chain links (a) and (b) itself (it can reach

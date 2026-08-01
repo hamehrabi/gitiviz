@@ -76,7 +76,14 @@ describe("plugins/claude-code/hooks/on-commit", () => {
       const child = execFile(
         "bash",
         [onCommitPath],
-        { cwd, maxBuffer: 10 * 1024 * 1024 },
+        {
+          cwd,
+          maxBuffer: 10 * 1024 * 1024,
+          // Hermetic: the launcher must never call out to `gh` for the
+          // Issues fetch from inside these tests (fixture repos have no
+          // remote anyway — this makes the opt-out explicit).
+          env: { ...process.env, GITIVIZ_SKIP_ISSUES: "1" }
+        },
         (error, stdout, stderr) => {
           const code = error ? ((error as { code?: number }).code ?? 1) : 0;
           resolvePromise({ code, stdout, stderr });
