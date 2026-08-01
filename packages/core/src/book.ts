@@ -13,8 +13,15 @@
  * no history chapter. Repo-derived strings (repository name) are hostile
  * data and pass through inert — escaping happens only at render time.
  */
-import type { BookManifest, ChangeManifest, ChapterId, ChapterStatus } from "@gitiviz/schema";
-import { CHAPTER_IDS } from "@gitiviz/schema";
+import type {
+  BookChapter,
+  BookManifest,
+  ChangeManifest,
+  ChapterId,
+  ChapterStatus,
+  NarratedChapterId
+} from "@gitiviz/schema";
+import { CHAPTER_IDS, NARRATED_CHAPTER_IDS } from "@gitiviz/schema";
 
 /** Reader-facing chapter titles, keyed by canonical chapter id. */
 const CHAPTER_TITLES: Record<ChapterId, string> = {
@@ -30,8 +37,17 @@ const CHAPTER_TITLES: Record<ChapterId, string> = {
   history: "How it got here"
 };
 
+/** Validated chapter narration for this chapter, if the narrator wrote one. */
+function narrationFor(id: ChapterId, manifest: ChangeManifest) {
+  if (!(NARRATED_CHAPTER_IDS as readonly string[]).includes(id)) return undefined;
+  return manifest.chapterNarrations?.[id as NarratedChapterId];
+}
+
 /** Status for one chapter given the change manifest it would draw from. */
 function chapterStatus(id: ChapterId, manifest: ChangeManifest): ChapterStatus {
+  // A validated (AI-)narrated chapter outranks the deterministic statuses —
+  // the narration only exists because applyNarration accepted it.
+  if (narrationFor(id, manifest) !== undefined) return "narrated";
   switch (id) {
     case "purpose":
       // Package metadata (repository name) is always present in a valid
@@ -54,10 +70,20 @@ export function buildBookManifest(manifest: ChangeManifest): BookManifest {
   return {
     specVersion: manifest.specVersion,
     repository: { name: manifest.repository.name },
-    chapters: CHAPTER_IDS.map((id) => ({
-      id,
-      title: CHAPTER_TITLES[id],
-      status: chapterStatus(id, manifest)
-    }))
+    chapters: CHAPTER_IDS.map((id) => {
+      const chapter: BookChapter = {
+        id,
+        title: CHAPTER_TITLES[id],
+        status: chapterStatus(id, manifest)
+      };
+      const narration = narrationFor(id, manifest);
+      if (narration !== undefined) {
+        chapter.narration = { summary: narration.summary };
+        if (narration.keyPoints !== undefined) {
+          chapter.narration.keyPoints = [...narration.keyPoints];
+        }
+      }
+      return chapter;
+    })
   };
 }

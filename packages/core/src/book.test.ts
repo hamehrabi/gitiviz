@@ -113,4 +113,51 @@ describe("buildBookManifest", () => {
     buildBookManifest(manifest);
     expect(manifest).toEqual(snapshot);
   });
+
+  it("marks narrated chapters and carries their narration into the book", () => {
+    const book = buildBookManifest(
+      makeManifest({
+        chapterNarrations: {
+          purpose: {
+            summary: "Exists so guests can order.",
+            keyPoints: ["Guest checkout"],
+            provenance: "inferred"
+          },
+          systems: { summary: "One route, one store.", provenance: "inferred" },
+          flows: { summary: "Intake writes to storage.", provenance: "inferred" }
+        }
+      })
+    );
+    const chapterOf = (id: string) => book.chapters.find((c) => c.id === id)!;
+    expect(chapterOf("purpose").status).toBe("narrated");
+    expect(chapterOf("systems").status).toBe("narrated");
+    expect(chapterOf("flows").status).toBe("narrated");
+    expect(chapterOf("purpose").narration).toEqual({
+      summary: "Exists so guests can order.",
+      keyPoints: ["Guest checkout"]
+    });
+    expect(chapterOf("flows").narration?.summary).toBe(
+      "Intake writes to storage."
+    );
+    // History is untouched by chapter narration.
+    expect(chapterOf("history").status).toBe("generated");
+    expect(validateBookManifest(book).ok).toBe(true);
+  });
+
+  it("keeps unnarrated chapter statuses unchanged when only flows is narrated", () => {
+    const book = buildBookManifest(
+      makeManifest({
+        chapterNarrations: {
+          flows: { summary: "Intake writes to storage.", provenance: "inferred" }
+        }
+      })
+    );
+    const statusOf = (id: string) =>
+      book.chapters.find((c) => c.id === id)?.status;
+    expect(statusOf("flows")).toBe("narrated");
+    expect(statusOf("purpose")).toBe("generated");
+    expect(statusOf("systems")).toBe("generated");
+    expect(statusOf("journeys")).toBe("not-written");
+    expect(validateBookManifest(book).ok).toBe(true);
+  });
 });

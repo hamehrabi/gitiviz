@@ -17,11 +17,36 @@ describe("book manifest validation", () => {
     expect(validateBookManifest(skeleton()).ok).toBe(true);
   });
 
-  it("accepts all three chapter statuses", () => {
+  it("accepts all four chapter statuses", () => {
     const m = skeleton();
     m.chapters[0].status = "generated";
     m.chapters[1].status = "curated";
+    m.chapters[2].status = "narrated";
     expect(validateBookManifest(m).ok).toBe(true);
+  });
+
+  it("accepts a narrated chapter carrying narration with up to 5 keyPoints", () => {
+    const m = skeleton();
+    m.chapters[0].status = "narrated";
+    (m.chapters[0] as Record<string, unknown>).narration = {
+      summary: "Why it exists.",
+      keyPoints: ["1", "2", "3", "4", "5"]
+    };
+    expect(validateBookManifest(m).ok).toBe(true);
+  });
+
+  it("rejects chapter narration with more than 5 keyPoints or no summary", () => {
+    const over = skeleton();
+    (over.chapters[0] as Record<string, unknown>).narration = {
+      summary: "ok",
+      keyPoints: ["1", "2", "3", "4", "5", "6"]
+    };
+    expect(validateBookManifest(over).ok).toBe(false);
+    const missing = skeleton();
+    (missing.chapters[0] as Record<string, unknown>).narration = {
+      keyPoints: ["no summary"]
+    };
+    expect(validateBookManifest(missing).ok).toBe(false);
   });
 
   it("rejects when a chapter id is missing", () => {

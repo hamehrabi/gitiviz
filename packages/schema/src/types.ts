@@ -86,6 +86,88 @@ export interface ChangeUnit extends Claim {
   afterDescription?: string | null;
   userImpact?: string | null;
   openQuestions?: string[];
+  /** Validated concept diagram for this unit's story (max 7 nodes). */
+  storyDiagram?: ConceptDiagram;
+}
+
+/**
+ * Named color tones for concept-diagram clusters and nodes. The renderer maps
+ * these to the canonical palette (docs/visual-reference.mmd); the narrator can
+ * only pick a name, never inject raw styling.
+ */
+export const DIAGRAM_TONES = [
+  "neutral",
+  "blue",
+  "amber",
+  "mint",
+  "rose",
+  "violet"
+] as const;
+
+export type DiagramTone = (typeof DIAGRAM_TONES)[number];
+
+/** A colored subgraph grouping concept nodes ("Evidence Pipeline", …). */
+export interface DiagramCluster {
+  id: string;
+  title: string;
+  tone: DiagramTone;
+}
+
+/**
+ * One concept-level diagram node: "Human name / role / [file]". The optional
+ * file must exist in the manifest's evidence index — fabricated paths are
+ * rejected at validation time.
+ */
+export interface DiagramNode {
+  id: string;
+  /** Id of the cluster this node sits in (declared in the same diagram). */
+  cluster?: string;
+  humanLabel: string;
+  role: string;
+  /** Repo-relative evidence path (hostile input — escape at render time). */
+  file?: string;
+}
+
+/** A verb-labeled arrow between two declared diagram nodes. */
+export interface DiagramEdge {
+  from: string;
+  to: string;
+  verb: string;
+}
+
+/**
+ * A validated concept diagram proposed by the narrator as structured data —
+ * never raw Mermaid, so markup injection is impossible by construction.
+ * Architecture diagrams cap at 20 nodes / 6 clusters; per-change-unit story
+ * diagrams cap at 7 nodes.
+ */
+export interface ConceptDiagram {
+  clusters?: DiagramCluster[];
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  provenance: Provenance;
+  /** Only permitted when provenance === "inferred". */
+  confidence?: number;
+}
+
+/** Project-level narration: what this repository is, in one breath. */
+export interface ProjectNarration {
+  summary: string;
+  provenance: Provenance;
+  confidence?: number;
+}
+
+/** The book chapters the narrator may fill in v0. */
+export const NARRATED_CHAPTER_IDS = ["purpose", "systems", "flows"] as const;
+
+export type NarratedChapterId = (typeof NARRATED_CHAPTER_IDS)[number];
+
+/** Narration for one book chapter: a summary plus at most 5 key points. */
+export interface ChapterNarration {
+  summary: string;
+  keyPoints?: string[];
+  provenance: Provenance;
+  confidence?: number;
 }
 
 /** Honest record of what analysis could not (or chose not to) do. */
@@ -109,6 +191,12 @@ export interface ChangeManifest {
   relationships: Relationship[];
   changeUnits: ChangeUnit[];
   analysisLimitations: AnalysisLimitation[];
+  /** Validated whole-range concept diagram (max 20 nodes / 6 clusters). */
+  architectureDiagram?: ConceptDiagram;
+  /** Project-level narration filled by the validated narrator. */
+  projectNarration?: ProjectNarration;
+  /** Chapter narrations for the narratable book chapters. */
+  chapterNarrations?: Partial<Record<NarratedChapterId, ChapterNarration>>;
 }
 
 /** The ten canonical book chapters, in reading order. */
@@ -127,12 +215,17 @@ export const CHAPTER_IDS = [
 
 export type ChapterId = (typeof CHAPTER_IDS)[number];
 
-export type ChapterStatus = "generated" | "curated" | "not-written";
+export type ChapterStatus = "generated" | "curated" | "narrated" | "not-written";
 
 export interface BookChapter {
   id: ChapterId;
   title: string;
   status: ChapterStatus;
+  /** Present when status === "narrated": the validated chapter narration. */
+  narration?: {
+    summary: string;
+    keyPoints?: string[];
+  };
 }
 
 export interface BookManifest {

@@ -293,6 +293,301 @@ describe("applyNarration — rejection rules", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Concept diagrams and project narration
+// ---------------------------------------------------------------------------
+
+/** A valid architecture diagram whose only file anchor exists in the fixture. */
+const makeArchitectureDiagram = () => ({
+  clusters: [
+    { id: "cluster-api", title: "API surface", tone: "blue" },
+    { id: "cluster-data", title: "Data layer", tone: "amber" }
+  ],
+  nodes: [
+    {
+      id: "n-orders",
+      cluster: "cluster-api",
+      humanLabel: "Order intake",
+      role: "accepts guest orders",
+      file: "src/routes/orders.ts"
+    },
+    {
+      id: "n-storage",
+      cluster: "cluster-data",
+      humanLabel: "Order storage",
+      role: "persists orders"
+    }
+  ],
+  edges: [{ from: "n-orders", to: "n-storage", verb: "writes to" }]
+});
+
+const makeStoryDiagram = () => ({
+  nodes: [
+    { id: "s-route", humanLabel: "Order intake", role: "new checkout route" },
+    { id: "s-guests", humanLabel: "Guests", role: "can now order" }
+  ],
+  edges: [{ from: "s-guests", to: "s-route", verb: "now use" }]
+});
+
+describe("buildNarrationRequest — diagram grounding", () => {
+  it("lists the evidence file inventory, sorted and de-duplicated", () => {
+    const manifest = makeManifest();
+    manifest.entities[0]!.evidence!.push({ path: "src/routes/orders.ts" });
+    const request = buildNarrationRequest(manifest);
+    expect(request.evidenceFiles).toEqual(
+      [...request.evidenceFiles].sort()
+    );
+    expect(request.evidenceFiles).toEqual(
+      [HOSTILE_LABEL, "src/routes/orders.ts"].sort()
+    );
+  });
+
+  it("includes the overview system rollup and a per-unit story rollup", () => {
+    const request = buildNarrationRequest(makeManifest());
+    expect(Array.isArray(request.systemRollup.nodes)).toBe(true);
+    expect(Array.isArray(request.systemRollup.edges)).toBe(true);
+    for (const unit of request.changeUnits) {
+      expect(Array.isArray(unit.storyRollup.nodes)).toBe(true);
+      expect(Array.isArray(unit.storyRollup.edges)).toBe(true);
+    }
+  });
+
+  it("states the diagram caps and the tone vocabulary", () => {
+    const request = buildNarrationRequest(makeManifest());
+    expect(request.diagramLimits.architecture.maxNodes).toBe(20);
+    expect(request.diagramLimits.architecture.maxClusters).toBe(6);
+    expect(request.diagramLimits.story.maxNodes).toBe(7);
+    expect(request.diagramLimits.tones).toContain("blue");
+    expect(request.diagramLimits.tones.length).toBe(6);
+    // Still pure JSON.
+    expect(JSON.parse(JSON.stringify(request))).toEqual(request);
+  });
+});
+
+describe("applyNarration — concept diagrams", () => {
+  it("accepts a valid architecture diagram and stamps it inferred", () => {
+    const result = applyNarration(makeManifest(), {
+      architectureDiagram: makeArchitectureDiagram()
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const diagram = result.value.architectureDiagram!;
+    expect(diagram.provenance).toBe("inferred");
+    expect(diagram.clusters).toHaveLength(2);
+    expect(diagram.nodes).toHaveLength(2);
+    expect(diagram.edges).toEqual([
+      { from: "n-orders", to: "n-storage", verb: "writes to" }
+    ]);
+    expect(validateChangeManifest(result.value).ok).toBe(true);
+  });
+
+  it("accepts a story diagram on a change unit (clusters optional)", () => {
+    const result = applyNarration(makeManifest(), {
+      changeUnits: [{ id: "unit-1", storyDiagram: makeStoryDiagram() }]
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const unit = result.value.changeUnits.find((u) => u.id === "unit-1")!;
+    expect(unit.storyDiagram?.provenance).toBe("inferred");
+    expect(unit.storyDiagram?.nodes).toHaveLength(2);
+    expect(validateChangeManifest(result.value).ok).toBe(true);
+  });
+
+  it("rejects fabricated file paths with an actionable error", () => {
+    const diagram = makeArchitectureDiagram();
+    diagram.nodes[0]!.file = "src/does-not-exist.ts";
+    const result = applyNarration(makeManifest(), {
+      architectureDiagram: diagram
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(
+      result.errors.some(
+        (e) => e.includes("src/does-not-exist.ts") && e.includes("evidence")
+      )
+    ).toBe(true);
+  });
+
+  it("rejects an architecture diagram over the 20-node cap", () => {
+    const diagram = makeArchitectureDiagram();
+    diagram.nodes = Array.from({ length: 21 }, (_, i) => ({
+      id: `n-${i}`,
+      humanLabel: `Node ${i}`,
+      role: "filler"
+    })) as typeof diagram.nodes;
+    diagram.edges = [];
+    const result = applyNarration(makeManifest(), {
+      architectureDiagram: diagram
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e) => e.includes("20"))).toBe(true);
+  });
+
+  it("rejects an architecture diagram over the 6-cluster cap", () => {
+    const diagram = makeArchitectureDiagram();
+    diagram.clusters = Array.from({ length: 7 }, (_, i) => ({
+      id: `c-${i}`,
+      title: `Cluster ${i}`,
+      tone: "blue"
+    }));
+    diagram.nodes = diagram.nodes.map((n) => ({ ...n, cluster: "c-0" }));
+    const result = applyNarration(makeManifest(), {
+      architectureDiagram: diagram
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e) => e.includes("6"))).toBe(true);
+  });
+
+  it("rejects a story diagram over the 7-node cap", () => {
+    const story = makeStoryDiagram();
+    story.nodes = Array.from({ length: 8 }, (_, i) => ({
+      id: `s-${i}`,
+      humanLabel: `Node ${i}`,
+      role: "filler"
+    }));
+    story.edges = [];
+    const result = applyNarration(makeManifest(), {
+      changeUnits: [{ id: "unit-1", storyDiagram: story }]
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e) => e.includes("7"))).toBe(true);
+  });
+
+  it("rejects structural violations: dup ids, dangling refs, bad tone, empty verb", () => {
+    const base = makeArchitectureDiagram;
+    const broken: Array<(d: ReturnType<typeof base>) => void> = [
+      (d) => d.nodes.push({ ...d.nodes[0]! }), // duplicate node id
+      (d) => d.edges.push({ from: "n-ghost", to: "n-orders", verb: "haunts" }),
+      (d) => {
+        d.clusters[0]!.tone = "hotpink" as never;
+      },
+      (d) => {
+        d.edges[0]!.verb = "";
+      },
+      (d) => {
+        d.nodes[0]!.cluster = "cluster-ghost";
+      },
+      (d) => d.clusters.push({ ...d.clusters[0]! }) // duplicate cluster id
+    ];
+    for (const sabotage of broken) {
+      const diagram = base();
+      sabotage(diagram);
+      const result = applyNarration(makeManifest(), {
+        architectureDiagram: diagram
+      });
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  it("rejects a diagram claiming provenance (derived or otherwise)", () => {
+    const result = applyNarration(makeManifest(), {
+      architectureDiagram: { ...makeArchitectureDiagram(), provenance: "derived" }
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e) => e.includes("provenance"))).toBe(true);
+  });
+
+  it("never throws on malformed diagrams", () => {
+    for (const malformed of [
+      "flowchart TD; a-->b", // raw Mermaid is structurally impossible
+      42,
+      [],
+      { nodes: "nope" },
+      { nodes: [null], edges: [] },
+      { nodes: [{ id: "a" }], edges: [] },
+      { nodes: [{ id: "a", humanLabel: "A", role: "r" }], edges: [null] },
+      { nodes: [{ id: "a", humanLabel: "A", role: "r", file: 42 }], edges: [] },
+      { clusters: "nope", nodes: [{ id: "a", humanLabel: "A", role: "r" }], edges: [] }
+    ]) {
+      expect(
+        applyNarration(makeManifest(), { architectureDiagram: malformed }).ok
+      ).toBe(false);
+      expect(
+        applyNarration(makeManifest(), {
+          changeUnits: [{ id: "unit-1", storyDiagram: malformed }]
+        }).ok
+      ).toBe(false);
+    }
+  });
+});
+
+describe("applyNarration — project narration", () => {
+  it("accepts projectSummary and chapter narrations, stamped inferred", () => {
+    const result = applyNarration(makeManifest(), {
+      projectSummary: "A fixture service that now accepts guest orders.",
+      chapters: {
+        purpose: {
+          summary: "Exists so guests can order.",
+          keyPoints: ["Guest checkout", "No account needed"]
+        },
+        systems: { summary: "One route talking to storage." },
+        flows: { summary: "Order intake writes to storage." }
+      }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.projectNarration?.summary).toBe(
+      "A fixture service that now accepts guest orders."
+    );
+    expect(result.value.projectNarration?.provenance).toBe("inferred");
+    const chapters = result.value.chapterNarrations!;
+    expect(chapters.purpose?.provenance).toBe("inferred");
+    expect(chapters.purpose?.keyPoints).toEqual([
+      "Guest checkout",
+      "No account needed"
+    ]);
+    expect(chapters.systems?.summary).toBe("One route talking to storage.");
+    expect(chapters.flows?.provenance).toBe("inferred");
+    expect(validateChangeManifest(result.value).ok).toBe(true);
+  });
+
+  it("rejects more than 5 keyPoints", () => {
+    const result = applyNarration(makeManifest(), {
+      chapters: {
+        purpose: {
+          summary: "ok",
+          keyPoints: ["1", "2", "3", "4", "5", "6"]
+        }
+      }
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e) => e.includes("5"))).toBe(true);
+  });
+
+  it("rejects unknown chapter slots and provenance claims", () => {
+    expect(
+      applyNarration(makeManifest(), {
+        chapters: { journeys: { summary: "not narratable yet" } }
+      }).ok
+    ).toBe(false);
+    expect(
+      applyNarration(makeManifest(), {
+        chapters: { purpose: { summary: "ok", provenance: "derived" } }
+      }).ok
+    ).toBe(false);
+  });
+
+  it("never throws on malformed project narration", () => {
+    for (const malformed of [
+      { projectSummary: 42 },
+      { projectSummary: "" },
+      { projectSummary: "x".repeat(5000) },
+      { chapters: "nope" },
+      { chapters: { purpose: null } },
+      { chapters: { purpose: { keyPoints: ["no summary"] } } },
+      { chapters: { purpose: { summary: 42 } } },
+      { chapters: { purpose: { summary: "ok", keyPoints: "nope" } } }
+    ]) {
+      expect(applyNarration(makeManifest(), malformed).ok).toBe(false);
+    }
+  });
+});
+
 describe("templateNarrator", () => {
   it("produces deterministic dry narration for every ungrouped unit", () => {
     const request = buildNarrationRequest(makeManifest());

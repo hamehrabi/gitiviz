@@ -18,13 +18,20 @@ export {
   type StoryProjection
 } from "./storyProjection.js";
 export {
+  MAX_ARCHITECTURE_DIAGRAM_NODES,
+  MAX_CHAPTER_KEY_POINTS,
+  MAX_DIAGRAM_CLUSTERS,
+  MAX_STORY_DIAGRAM_NODES,
   applyNarration,
   applyTemplateNarration,
   buildNarrationRequest,
   templateNarrator,
   type ChangeUnitNarration,
+  type ChapterNarrationProposal,
   type EntityNarration,
   type NarrationChangeUnitFact,
+  type NarrationDiagram,
+  type NarrationDiagramLimits,
   type NarrationEntityFact,
   type NarrationRelationshipFact,
   type NarrationRequest,
