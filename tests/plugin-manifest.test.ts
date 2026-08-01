@@ -54,10 +54,18 @@ describe(".claude-plugin/marketplace.json", () => {
 });
 
 describe("commands/", () => {
-  const EXPECTED = ["branch.md", "commit.md", "compare.md", "init.md", "open.md"];
+  const EXPECTED = [
+    "branch.md",
+    "commit.md",
+    "compare.md",
+    "discuss.md",
+    "init.md",
+    "open.md",
+    "ticket.md"
+  ];
   const files = readdirSync(commandsDir).filter((f) => f.endsWith(".md")).sort();
 
-  it("contains exactly the five slash commands", () => {
+  it("contains exactly the seven slash commands", () => {
     expect(files).toEqual(EXPECTED);
   });
 
@@ -88,6 +96,33 @@ describe("commands/", () => {
       expect(source).toContain(
         'Bash(${CLAUDE_PLUGIN_ROOT}/plugins/claude-code/scripts/run.sh:*)'
       );
+    });
+  });
+
+  describe("gh pre-authorization stays narrow", () => {
+    it.each(["discuss.md", "ticket.md"])(
+      "%s pre-authorizes only the two narrow gh verbs",
+      (file) => {
+        const source = readFileSync(join(commandsDir, file), "utf8");
+        const frontmatter = /^---\n([\s\S]+?)\n---\n/.exec(source)![1]!;
+        const ghAuths = [...frontmatter.matchAll(/Bash\(gh[^)]*\)/g)]
+          .map((m) => m[0])
+          .sort();
+        expect(ghAuths).toEqual([
+          "Bash(gh issue create:*)",
+          "Bash(gh label create:*)"
+        ]);
+      }
+    );
+
+    it("no command ever pre-authorizes broad gh — Bash(gh:*) is forbidden", () => {
+      for (const file of files) {
+        const source = readFileSync(join(commandsDir, file), "utf8");
+        expect(
+          source,
+          `${file} must never contain a broad Bash(gh:…) pre-authorization`
+        ).not.toContain("Bash(gh:");
+      }
     });
   });
 

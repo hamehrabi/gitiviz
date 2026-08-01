@@ -37,6 +37,8 @@ machine, or Docker as a fallback (the launcher picks whichever is available).
 | `/gitiviz:branch [base]` | Explain what the current branch changed vs a base (default: the repo's main branch) |
 | `/gitiviz:commit <sha>` | Explain one commit vs its parent |
 | `/gitiviz:compare <base> <head>` | Explain an arbitrary range — branch names, SHAs, `HEAD~3`, anything `git rev-parse` accepts |
+| `/gitiviz:discuss <sha>` | Discuss one commit's story; raises a GitHub ticket only when you ask |
+| `/gitiviz:ticket <sha> <title>` | File a GitHub issue from a commit's story, labeled `gitiviz` |
 | `/gitiviz:open` | Open the generated HTML book |
 
 Each command runs the deterministic engine, has Claude write narration through
