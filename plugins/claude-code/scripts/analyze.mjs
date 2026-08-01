@@ -6594,11 +6594,11 @@ var require_ajv = __commonJS({
 });
 
 // packages/cli/src/index.ts
-import { join as join3, resolve as resolve2 } from "node:path";
+import { join as join4, resolve as resolve2 } from "node:path";
 
 // packages/cli/src/commands/compare.ts
-import { mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "node:fs/promises";
-import { join as join2 } from "node:path";
+import { mkdir as mkdir2, readFile as readFile3, writeFile as writeFile2 } from "node:fs/promises";
+import { join as join3 } from "node:path";
 
 // packages/cli/src/repo-name.ts
 import { basename, resolve } from "node:path";
@@ -7351,6 +7351,7 @@ function buildEvidenceGraph(input) {
 import { createHash as createHash2 } from "node:crypto";
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 var MAX_SUBJECT_LENGTH = 2e3;
+var MAX_EVIDENCE_PATHS = 500;
 function unitId(sha) {
   return createHash2("sha1").update(`change-unit\0${sha}`).digest("hex").slice(0, 12);
 }
@@ -7461,12 +7462,25 @@ async function buildChangeUnits(input) {
         message: `Could not classify commit ${commit.sha}: ${error instanceof Error ? error.message : String(error)}. Treating it as a meaningful change.`
       });
     }
-    if (entities.length > 0) {
+    const wantsEvidence = unit.grouped !== true;
+    if (wantsEvidence || entities.length > 0) {
       try {
-        unit.entities = attachedEntityIds(entities, await touchedPaths(repoDir, commit));
+        const paths = await touchedPaths(repoDir, commit);
+        if (entities.length > 0) {
+          unit.entities = attachedEntityIds(entities, paths);
+        }
+        if (wantsEvidence && paths.size > 0) {
+          const sorted = [...paths].sort();
+          if (sorted.length > MAX_EVIDENCE_PATHS) {
+            limitations.push({
+              message: `Commit ${commit.sha} touched ${sorted.length} paths; only the first ${MAX_EVIDENCE_PATHS} (sorted) are recorded as its change unit's evidence.`
+            });
+          }
+          unit.evidence = sorted.slice(0, MAX_EVIDENCE_PATHS).map((path) => ({ path }));
+        }
       } catch (error) {
         limitations.push({
-          message: `Could not list files touched by commit ${commit.sha}: ${error instanceof Error ? error.message : String(error)}. No entities attached to its change unit.`
+          message: `Could not list files touched by commit ${commit.sha}: ${error instanceof Error ? error.message : String(error)}. No entities attached to its change unit and no evidence paths recorded.`
         });
       }
     }
@@ -8795,6 +8809,24 @@ function safeUrl(value, allowedOrigins = []) {
   return null;
 }
 
+// packages/renderer/src/links.ts
+function repoFileUrl(file, options) {
+  const { linkBase, allowedOrigins = [], existingFiles } = options;
+  if (linkBase === void 0 || existingFiles === void 0) return null;
+  if (!existingFiles.has(file)) return null;
+  const safeBase = safeUrl(linkBase, allowedOrigins);
+  if (safeBase === null) return null;
+  const encoded = file.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+  const url = safeUrl(
+    `${safeBase.replace(/\/+$/, "")}/${encoded}`,
+    allowedOrigins
+  );
+  if (url === null) return null;
+  if (new URL(url).origin !== new URL(safeBase).origin) return null;
+  if (/["\s<>\\]/.test(url)) return null;
+  return url;
+}
+
 // packages/renderer/src/layout.ts
 var NODE_WIDTH = 172;
 var NODE_HEIGHT = 64;
@@ -9106,20 +9138,7 @@ function escLabel(value) {
   return value.replace(/#/g, "#35;").replace(/"/g, "#quot;").replace(/</g, "#lt;").replace(/>/g, "#gt;").replace(/&/g, "#amp;").replace(/[|\\]/g, " ").replace(/\s+/g, " ").trim();
 }
 function clickUrl(file, options) {
-  const { linkBase, allowedOrigins = [], existingFiles } = options;
-  if (linkBase === void 0 || existingFiles === void 0) return null;
-  if (!existingFiles.has(file)) return null;
-  const safeBase = safeUrl(linkBase, allowedOrigins);
-  if (safeBase === null) return null;
-  const encoded = file.split("/").map((segment) => encodeURIComponent(segment)).join("/");
-  const url = safeUrl(
-    `${safeBase.replace(/\/+$/, "")}/${encoded}`,
-    allowedOrigins
-  );
-  if (url === null) return null;
-  if (new URL(url).origin !== new URL(safeBase).origin) return null;
-  if (/["\s<>\\]/.test(url)) return null;
-  return url;
+  return repoFileUrl(file, options);
 }
 function nodeLine(node) {
   return `${node.id}["${node.labelLines.join("<br/>")}"]`;
@@ -9371,24 +9390,31 @@ var commitPageCss = `
 .cp-diagram svg{display:block;max-width:100%;height:auto}
 .cp-diagram figcaption{margin:0.75rem 0 0;font-size:0.8125rem;color:#6b7280}
 .cp-no-diagram{display:flex;align-items:center;justify-content:center;min-height:6rem;margin:0;color:#6b7280;background:#f9fafb;border-radius:4px}
-.cp-source{margin:0.75rem 0 0}
-.cp-source>summary{cursor:pointer;color:#6b7280;font-size:0.8125rem}
-.cp-source pre{margin:0.5rem 0 0;padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;overflow-x:auto;font-size:0.75rem;line-height:1.5}
-.cp-source code{font-family:${MONO};background:transparent;border:none;padding:0}
 .cp-ev-figure{margin:0.75rem 0;padding:0.5rem;border:1px solid #e5e7eb;border-radius:6px;background:#ffffff;overflow-x:auto}
 .cp-ev-figure svg{display:block;max-width:100%;height:auto}
 .cp-unchanged,.cp-evidence{margin:1rem 0;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem 1rem}
 .cp-unchanged>summary,.cp-evidence>summary{cursor:pointer;color:#6b7280;font-size:0.875rem;overflow-wrap:anywhere}
 .cp-unchanged p{margin:0.5rem 0;font-size:0.875rem;color:#6b7280}
-.cp-back{margin:1.5rem 0}
+.cp-footer{margin:1.5rem 0}
 .cp-back-link{display:inline-block;color:#1d4ed8;text-decoration:none;font-weight:600;border:1px solid #bfdbfe;background:#eff6ff;border-radius:6px;padding:0.4375rem 0.875rem}
 .cp-back-link:hover{border-color:#1d4ed8}
 .cp-back-link:focus-visible{outline:2px solid #1d4ed8;outline-offset:2px}
+.cp-discuss{margin:1rem 0 0;padding:0.75rem 1rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb}
+.cp-discuss-title{margin:0 0 0.375rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280}
+.cp-discuss-cmd{-webkit-user-select:all;user-select:all;display:inline-block;font-family:${MONO};font-size:0.8125rem;color:#1f2937;background:#ffffff;border:1px solid #e5e7eb;border-radius:4px;padding:0.25em 0.5em;overflow-wrap:anywhere}
+.cp-discuss-hint{margin:0.375rem 0 0;font-size:0.8125rem;color:#6b7280}
 .cp-ev-title{margin:0.75rem 0 0.25rem;overflow-wrap:anywhere}
 .cp-ev-title code{font-family:${MONO};font-size:0.8125rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}
 .cp-ev-list{list-style:none;margin:0.5rem 0 0.75rem;padding:0}
 .cp-ev-list li{margin:0.375rem 0;overflow-wrap:anywhere}
 .cp-ev-list code{font-family:${MONO};font-size:0.8125rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}
+.cp-ev-list a{color:#1d4ed8;text-decoration:none;overflow-wrap:anywhere}
+.cp-ev-list a code{color:#1d4ed8}
+.cp-ev-list a:hover code{border-color:#1d4ed8}
+.cp-ev-list a:focus-visible{outline:2px solid #1d4ed8;outline-offset:2px}
+.cp-ev-heading{margin:1rem 0 0.25rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280}
+.cp-ev-more{margin:0.375rem 0 0.5rem;border:none;border-radius:0;padding:0}
+.cp-ev-more>summary{cursor:pointer;color:#6b7280;font-size:0.8125rem}
 .cp-ev-muted{color:#6b7280}
 .cp-ev-empty{margin:0.5rem 0;color:#6b7280;font-size:0.875rem}
 @media (max-width:479px){.cp-row{flex-direction:column;gap:0.125rem}.cp-row dt{width:auto;padding-top:0}}
@@ -9403,40 +9429,113 @@ function beforeAfterRow(slot, label, text) {
 }
 function diagramFigure(diagramSvg, extras) {
   const body = diagramSvg ?? `<p class="cp-no-diagram">No diagram for this change.</p>`;
-  const source = extras.sourceText == null ? "" : `<details class="cp-source"><summary>Diagram source</summary><pre><code>${escHtml(extras.sourceText)}</code></pre></details>`;
   const note = extras.fallbackNote == null ? "" : `<figcaption>${escHtml(extras.fallbackNote)}</figcaption>`;
-  return `<figure class="cp-diagram">${body}${source}${note}</figure>`;
+  return `<figure class="cp-diagram">${body}${note}</figure>`;
 }
 function unchangedFold(count) {
   if (count === 0) return "";
   const noun = count === 1 ? "component" : "components";
   return `<details class="cp-unchanged"><summary>Unchanged: ${count} ${noun}</summary><p>${count} ${noun} in the system ${count === 1 ? "was" : "were"} not touched by this change.</p></details>`;
 }
-function anchorLine(anchor) {
-  let text = escHtml(anchor.path);
+function footerSection(unit) {
+  const back = `<a class="cp-back-link" href="#">\u2190 All changes</a>`;
+  const panel = unit.shortSha === null ? "" : `<div class="cp-discuss"><p class="cp-discuss-title">Discuss &amp; ticket</p><code class="cp-discuss-cmd">${escHtml(`/gitiviz:discuss ${unit.shortSha}`)}</code><p class="cp-discuss-hint">Select the command, then run it in Claude Code from this repository to ask questions or open a GitHub ticket.</p></div>`;
+  return `<footer class="cp-footer">${back}${panel}</footer>`;
+}
+var SOURCES_VISIBLE_LIMIT = 10;
+function anchorLine(anchor, sourceLinks) {
+  const code = `<code>${escHtml(anchor.path)}</code>`;
+  const url = sourceLinks?.get(anchor.path);
+  let text = url === void 0 ? code : `<a href="${escAttr(url)}" target="_blank" rel="noopener">${code}</a>`;
   if (anchor.range) {
     text += ` <span class="cp-ev-muted">lines ${anchor.range.startLine}\u2013${anchor.range.endLine}</span>`;
   }
   if (anchor.symbol) {
     text += ` <span class="cp-ev-muted">\xB7 ${escHtml(anchor.symbol)}</span>`;
   }
-  return `<li>${DERIVED_MARK} <code>${text}</code></li>`;
+  return `<li>${DERIVED_MARK} ${text}</li>`;
+}
+function sourcesSection(unit, extras) {
+  const lines = (unit.unit.evidence ?? []).map(
+    (anchor) => anchorLine(anchor, extras.sourceLinks)
+  );
+  if (lines.length === 0) return "";
+  const visible = lines.slice(0, SOURCES_VISIBLE_LIMIT);
+  const rest = lines.slice(SOURCES_VISIBLE_LIMIT);
+  const more = rest.length === 0 ? "" : `<details class="cp-ev-more"><summary>+${rest.length} more file${rest.length === 1 ? "" : "s"}</summary><ul class="cp-ev-list">${rest.join("")}</ul></details>`;
+  return `<p class="cp-ev-heading">Sources</p><ul class="cp-ev-list">${visible.join("")}</ul>` + more;
 }
 function evidenceFold(unit, extras) {
   const commits = (unit.unit.commits ?? []).map(
     (sha) => `<li>${DERIVED_MARK} Commit <code title="${escAttr(sha)}">${escHtml(sha.slice(0, 7))}</code></li>`
   );
-  const anchors = (unit.unit.evidence ?? []).map(anchorLine);
-  const lines = [...commits, ...anchors];
-  const list = lines.length === 0 ? `<p class="cp-ev-empty">No recorded evidence for this change.</p>` : `<ul class="cp-ev-list">${lines.join("")}</ul>`;
+  const commitList = commits.length === 0 ? "" : `<ul class="cp-ev-list">${commits.join("")}</ul>`;
+  const sources = sourcesSection(unit, extras);
+  const empty = commitList === "" && sources === "" ? `<p class="cp-ev-empty">No recorded evidence for this change.</p>` : "";
   const graph = extras.evidenceSvg == null ? "" : `<figure class="cp-ev-figure">${extras.evidenceSvg}</figure>`;
-  return `<details class="cp-evidence"><summary>Technical evidence</summary><p class="cp-ev-title">${DERIVED_MARK} <code>${escHtml(unit.unit.technicalTitle)}</code></p>` + graph + list + `</details>`;
+  return `<details class="cp-evidence"><summary>Technical evidence</summary><p class="cp-ev-title">${DERIVED_MARK} <code>${escHtml(unit.unit.technicalTitle)}</code></p>` + graph + commitList + sources + empty + `</details>`;
 }
 function renderCommitPage(unit, diagramSvg, extras = {}) {
   const anchorId = escAttr(unit.anchorId);
   const mark = unit.titleInferred ? ` ${INFERRED_MARK2}` : "";
   const purpose = unit.purpose ? `<p class="cp-purpose">${escHtml(unit.purpose)}</p>` : "";
-  return `<section class="cp-page" id="${anchorId}" aria-labelledby="${anchorId}-title">` + metaRow(unit) + `<h2 class="cp-title" id="${anchorId}-title">${escHtml(unit.title)}${mark}</h2>` + purpose + `<dl class="cp-beforeafter">` + beforeAfterRow("before", "Before", unit.before) + beforeAfterRow("after", "After", unit.after) + `</dl>` + diagramFigure(diagramSvg, extras) + unchangedFold(unit.unchangedCount) + `<p class="cp-back"><a class="cp-back-link" href="#">\u2190 All changes</a></p>` + evidenceFold(unit, extras) + `</section>`;
+  return `<section class="cp-page" id="${anchorId}" aria-labelledby="${anchorId}-title">` + metaRow(unit) + `<h2 class="cp-title" id="${anchorId}-title">${escHtml(unit.title)}${mark}</h2>` + purpose + `<dl class="cp-beforeafter">` + beforeAfterRow("before", "Before", unit.before) + beforeAfterRow("after", "After", unit.after) + `</dl>` + diagramFigure(diagramSvg, extras) + unchangedFold(unit.unchangedCount) + footerSection(unit) + evidenceFold(unit, extras) + `</section>`;
+}
+
+// packages/renderer/src/issues.ts
+var EMPTY_STATE = "No tickets yet \u2014 create one from any commit page.";
+var EMPTY_MECHANISM = "Tickets are GitHub issues labeled gitiviz, fetched with your local gh CLI each time the book is rebuilt.";
+var MONO2 = `ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`;
+var issuesCss = `
+/* --- issues view (iv-) --- */
+.iv-card{display:flex;flex-direction:column;gap:0.375rem;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:1rem;margin:0 0 1rem;color:inherit;text-decoration:none}
+.iv-card-link:hover{border-color:#d1d5db;box-shadow:0 2px 8px rgba(17,24,39,0.08)}
+.iv-card-link:focus-visible{outline:2px solid #1d4ed8;outline-offset:2px}
+.iv-meta{display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin:0}
+.iv-number{font-family:${MONO2};font-size:0.75rem;color:#9ca3af}
+.iv-state{font-size:0.6875rem;font-weight:600;line-height:1.7;padding:0 0.5rem;border-radius:999px;color:#4b5563;background:#f3f4f6;border:1px solid #e5e7eb;overflow-wrap:anywhere}
+.iv-state-open{color:#047857;background:#ecfdf5;border-color:#a7f3d0}
+.iv-state-closed{color:#6d28d9;background:#f5f3ff;border-color:#ddd6fe}
+.iv-date{font-size:0.75rem;color:#9ca3af}
+.iv-title{font-size:0.9375rem;font-weight:600;color:#1f2937;margin:0}
+.iv-empty{margin:0.75rem 0 0.25rem}
+.iv-empty-note{margin:0.25rem 0;font-size:0.875rem;color:#6b7280}
+`;
+function issueUrl(url, links) {
+  if (links?.origin === void 0) return null;
+  const safe = safeUrl(url, links.allowedOrigins ?? []);
+  if (safe === null) return null;
+  let repoOrigin;
+  try {
+    repoOrigin = new URL(links.origin).origin;
+  } catch {
+    return null;
+  }
+  if (new URL(safe).origin !== repoOrigin) return null;
+  if (/["\s<>\\]/.test(safe)) return null;
+  return safe;
+}
+function stateKind(state) {
+  const normalized = state.toLowerCase();
+  if (normalized === "open") return "open";
+  if (normalized === "closed") return "closed";
+  return "other";
+}
+function renderIssueCard(issue, links) {
+  const kind = stateKind(issue.state);
+  const stateLabel = kind === "other" ? escHtml(issue.state) : kind;
+  const date = issue.createdAt.slice(0, 10);
+  const dateHtml = date === "" ? "" : `<span class="iv-date">${escHtml(date)}</span>`;
+  const body = `<p class="iv-meta"><span class="iv-number">#${issue.number}</span><span class="iv-state iv-state-${kind}">${stateLabel}</span>` + dateHtml + `</p><p class="iv-title">${escHtml(issue.title)}</p>`;
+  const url = issueUrl(issue.url, links);
+  if (url === null) return `<div class="iv-card">${body}</div>`;
+  return `<a class="iv-card iv-card-link" href="${escAttr(url)}" target="_blank" rel="noopener">${body}</a>`;
+}
+function renderIssuesList(issues, links) {
+  if (issues.length === 0) {
+    return `<p class="iv-empty">${escHtml(EMPTY_STATE)}</p><p class="iv-empty-note">${escHtml(EMPTY_MECHANISM)}</p>`;
+  }
+  return issues.map((issue) => renderIssueCard(issue, links)).join("");
 }
 
 // packages/renderer/src/dashboardTypes.ts
@@ -9570,6 +9669,21 @@ function compileOptions(change, mermaid) {
     existingFiles: evidenceFiles(change)
   };
 }
+function unitSourceLinks(unit, change, links) {
+  const map = /* @__PURE__ */ new Map();
+  if (links?.linkBase === void 0) return map;
+  const policy = {
+    linkBase: links.linkBase,
+    ...links.allowedOrigins !== void 0 ? { allowedOrigins: links.allowedOrigins } : {},
+    existingFiles: evidenceFiles(change)
+  };
+  for (const anchor of unit.evidence ?? []) {
+    if (map.has(anchor.path)) continue;
+    const url = repoFileUrl(anchor.path, policy);
+    if (url !== null) map.set(anchor.path, url);
+  }
+  return map;
+}
 function architectureMermaidSource(book, change, mermaid) {
   const chapter = book.chapters.find((c) => c.id === "systems");
   if (chapter === void 0 || chapter.status === "not-written") return null;
@@ -9652,14 +9766,13 @@ function conceptFallbackSvg(diagram, kind) {
   }));
   return kind === "context" ? contextDiagram(entities, relationships) : changeDiagram(entities, relationships);
 }
-function heroFigure(svg, sourceText, mermaidRendered, caption) {
+function heroFigure(svg, mermaidRendered, caption) {
   const captionHtml = caption === "" ? "" : `<p class="caption">${escHtml(caption)}</p>`;
   if (svg === null) {
     return captionHtml + `<figure class="diagram diagram-placeholder"><p class="muted">Diagram not yet available.</p></figure>`;
   }
-  const source = sourceText === null ? "" : `<details class="diagram-source"><summary>Diagram source</summary><pre><code>${escHtml(sourceText)}</code></pre></details>`;
   const note = mermaidRendered ? "" : `<figcaption class="diagram-note">${escHtml(MERMAID_FALLBACK_NOTE)}</figcaption>`;
-  return captionHtml + `<figure class="diagram">${svg}${source}${note}</figure>`;
+  return captionHtml + `<figure class="diagram">${svg}${note}</figure>`;
 }
 function timeline(units) {
   const meaningful = units.filter((unit) => !unit.grouped);
@@ -9701,7 +9814,7 @@ function relationshipList(change) {
     const to = byId2.get(rel.to)?.humanLabel ?? rel.to;
     return `<li>${escHtml(from)} \u2014${escHtml(rel.verb)}\u2192 ${escHtml(to)}</li>`;
   }).join("");
-  return `<h3>Connections</h3><ul class="relationships">${items}</ul>`;
+  return `<ul class="relationships">${items}</ul>`;
 }
 function viewHead(title, subtitle) {
   const sub = subtitle === "" ? "" : `<p class="view-sub">${subtitle}</p>`;
@@ -9737,20 +9850,24 @@ function commitPageSection(unit, index, change, options) {
     "change"
   );
   const heroSvg = mermaidSvg ?? fallbackSvg;
+  const sourceLinks = unitSourceLinks(unit, change, options.links);
   return renderCommitPage(toCommitPageModel(unit, index, change), heroSvg, {
-    sourceText,
     fallbackNote: fallbackSvg !== null ? MERMAID_FALLBACK_NOTE : null,
-    evidenceSvg
+    evidenceSvg,
+    ...sourceLinks.size > 0 ? { sourceLinks } : {}
   });
 }
 function overviewView(book, change, meaningful) {
   const count = meaningful.length;
   const countText = `${count} meaningful change${count === 1 ? "" : "s"}`;
+  const lead = change.projectNarration === void 0 ? "" : `<p class="lead">${INFERRED_MARK3} ${escHtml(change.projectNarration.summary)}</p>`;
+  const purposePoints = change.chapterNarrations?.purpose?.keyPoints ?? [];
+  const whyItExists = purposePoints.length === 0 ? "" : `<h3>Why it exists</h3><ul class="keypoints">` + purposePoints.map((point) => `<li>${INFERRED_MARK3} ${escHtml(point)}</li>`).join("") + `</ul>`;
   const purposeChapter = book.chapters.find((chapter) => chapter.id === "purpose");
   const systems = change.entities.filter((entity) => entity.kind === "system");
   const purpose = purposeChapter?.status !== "not-written" && systems.length > 0 ? `<h3>What this repository is</h3>` + entityList(systems) : "";
   const limitations = change.analysisLimitations.length === 0 ? "" : `<details><summary>Analysis limitations</summary><ul>` + change.analysisLimitations.map((limitation) => `<li>${escHtml(limitation.message)}</li>`).join("") + `</ul></details>`;
-  return viewHead("Overview", escHtml(OVERVIEW_QUESTION)) + `<p>${escHtml(change.repository.name)}: ${countText} from <code>${escHtml(shortRev(change.baseRevision))}</code> to <code>${escHtml(shortRev(change.headRevision))}</code>.</p>` + purpose + `<h3>Commit timeline</h3>` + timeline(change.changeUnits) + limitations;
+  return viewHead("Overview", escHtml(OVERVIEW_QUESTION)) + lead + `<p>${escHtml(change.repository.name)}: ${countText} from <code>${escHtml(shortRev(change.baseRevision))}</code> to <code>${escHtml(shortRev(change.headRevision))}</code>.</p>` + whyItExists + purpose + `<h3>Commit timeline</h3>` + timeline(change.changeUnits) + limitations;
 }
 function architectureView(book, change, options) {
   const head = viewHead("Architecture", escHtml(CHAPTER_QUESTIONS.systems));
@@ -9768,7 +9885,6 @@ function architectureView(book, change, options) {
   );
   const hero = heroFigure(
     mermaidSvg ?? fallbackSvg,
-    sourceText,
     mermaidSvg !== null,
     "The systems this change touches, at a glance."
   );
@@ -9778,15 +9894,29 @@ function architectureView(book, change, options) {
     relationships: change.relationships
   }) : null;
   const anchors = change.entities.flatMap((entity) => entity.evidence ?? []);
-  const evidence = `<details><summary>Technical evidence</summary>` + (fullGraph === null ? "" : `<figure class="diagram">${fullGraph}</figure>`) + entityList(change.entities) + relationshipList(change) + (anchors.length === 0 ? "" : `<ul class="evidence">${anchors.map(anchorLine2).join("")}</ul>`) + `</details>`;
+  const relationships = relationshipList(change);
+  const evidence = `<details><summary>Technical evidence</summary>` + (fullGraph === null ? "" : `<figure class="diagram">${fullGraph}</figure>`) + entityList(change.entities) + (relationships === "" ? "" : `<h3>Connections</h3>` + relationships) + (anchors.length === 0 ? "" : `<ul class="evidence">${anchors.map(anchorLine2).join("")}</ul>`) + `</details>`;
   return head + lede + hero + evidence;
 }
+var HOW_IT_WORKS_QUESTION = "How do I install and use it?";
 function howItWorksView(change) {
-  const head = viewHead("How it works", escHtml(CHAPTER_QUESTIONS.flows));
-  if (change.relationships.length === 0) {
-    return head + `<p class="muted">Not yet written.</p>`;
+  const head = viewHead("How it works", escHtml(HOW_IT_WORKS_QUESTION));
+  const relationships = relationshipList(change);
+  const connections = relationships === "" ? "" : `<details class="connections"><summary>Derived connections</summary>` + relationships + `</details>`;
+  const narration = change.chapterNarrations?.flows;
+  if (narration === void 0) {
+    if (connections === "") {
+      return head + `<p class="muted">Not yet written.</p>`;
+    }
+    return head + `<p class="muted">No usage guide narrated yet \u2014 run /gitiviz:init.</p>` + connections;
   }
-  return head + relationshipList(change);
+  const points = narration.keyPoints ?? [];
+  const steps = points.length === 0 ? "" : `<ol class="guide-steps">` + points.map((point) => `<li>${escHtml(point)}</li>`).join("") + `</ol>`;
+  return head + `<p class="lead">${INFERRED_MARK3} ${escHtml(narration.summary)}</p>` + steps + connections;
+}
+var ISSUES_QUESTION = "What has been discussed and ticketed?";
+function issuesView(options) {
+  return viewHead("Issues", escHtml(ISSUES_QUESTION)) + renderIssuesList(options.issues ?? [], options.links);
 }
 var MORE_CHAPTER_IDS = [
   "journeys",
@@ -9814,7 +9944,13 @@ function moreView(book, change) {
 var ACTIVE_TAB = `color:#1d4ed8;background:#eff6ff;border-left-color:#1d4ed8;font-weight:600`;
 var INACTIVE_TAB = `color:#4b5563;background:transparent;border-left-color:transparent;font-weight:400`;
 var FOCUS_RING2 = `outline:2px solid #1d4ed8;outline-offset:2px`;
-var OTHER_VIEW_IDS = ["overview", "architecture", "how-it-works", "more"];
+var OTHER_VIEW_IDS = [
+  "overview",
+  "architecture",
+  "how-it-works",
+  "issues",
+  "more"
+];
 function shellCss() {
   const anyOtherTargeted = OTHER_VIEW_IDS.map((id) => `#${id}:target`).join(",");
   const tabRules = [
@@ -9852,7 +9988,7 @@ function shellCss() {
     `main>section:target{display:block}`,
     `#home{display:block}`,
     `main>section:target~#home{display:none}`,
-    `#overview,#architecture,#how-it-works,#more{max-width:44rem}`,
+    `#overview,#architecture,#how-it-works,#issues,#more{max-width:44rem}`,
     ...tabRules,
     // Type scale: view heading > sidebar wordmark > metadata.
     `h2{font-size:1.5rem;font-weight:600;letter-spacing:-0.015em;margin:0 0 0.25rem}`,
@@ -9861,6 +9997,14 @@ function shellCss() {
     `h3{font-size:0.75rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;margin:2rem 0 0.75rem}`,
     `p{margin:0.75rem 0}`,
     `.muted{color:#6b7280}`,
+    // Narrated leads (◇): one breath of AI interpretation above the facts.
+    `p.lead{font-size:1.0625rem;margin:0 0 1rem}`,
+    // Narrated key points (◇ per item — the glyph is the list marker).
+    `ul.keypoints{list-style:none;margin:0.5rem 0 1rem;padding-left:0}`,
+    `ul.keypoints li{margin:0.375rem 0}`,
+    // Narrated install/usage guide: the ol numbering IS the affordance.
+    `ol.guide-steps{margin:0.75rem 0 1.25rem;padding-left:1.5rem}`,
+    `ol.guide-steps li{margin:0.5rem 0}`,
     `code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.875em;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.1em 0.35em;overflow-wrap:anywhere}`,
     `ul,ol{margin:0.5rem 0;padding-left:1.5rem}`,
     `li{margin:0.25rem 0;overflow-wrap:anywhere}`,
@@ -9872,12 +10016,8 @@ function shellCss() {
     `figure.diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;overflow-x:auto}`,
     `figure.diagram svg{display:block;max-width:100%;height:auto}`,
     `figure.diagram-placeholder{display:flex;align-items:center;justify-content:center;min-height:8rem;background:#f9fafb}`,
-    // Honest fallback note + collapsed mermaid source under each diagram.
+    // Honest fallback note under each diagram.
     `figure.diagram figcaption.diagram-note{margin:0.75rem 0 0;font-size:0.8125rem;color:#6b7280}`,
-    `figure.diagram details.diagram-source{margin:0.75rem 0 0;border:none;border-radius:0;padding:0}`,
-    `figure.diagram details.diagram-source summary{font-size:0.8125rem}`,
-    `figure.diagram details.diagram-source pre{margin:0.5rem 0 0;padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;overflow-x:auto;font-size:0.75rem;line-height:1.5}`,
-    `figure.diagram details.diagram-source code{background:transparent;border:none;padding:0}`,
     `.caption{margin:1.5rem 0 0.5rem;font-size:1.0625rem}`,
     // Vertical commit timeline: hairline spine, one node per change unit.
     `ol.timeline{list-style:none;margin:1rem 0 0.5rem;padding:0}`,
@@ -9903,7 +10043,7 @@ function shellCss() {
   ].join("\n");
 }
 function stylesheet() {
-  return [shellCss(), sidebarCss, cardsCss, commitPageCss].join("\n");
+  return [shellCss(), sidebarCss, cardsCss, commitPageCss, issuesCss].join("\n");
 }
 var CSP_CONTENT = "default-src 'none'; style-src 'unsafe-inline'; img-src data:;";
 var TABS = [
@@ -9911,12 +10051,13 @@ var TABS = [
   { id: "overview", label: "Overview", href: "#overview" },
   { id: "architecture", label: "Architecture", href: "#architecture" },
   { id: "how-it-works", label: "How it works", href: "#how-it-works" },
+  { id: "issues", label: "Issues", href: "#issues" },
   { id: "more", label: "More", href: "#more" }
 ];
 function renderChangeBook(book, change, options = {}) {
   const meaningful = change.changeUnits.filter((unit) => !unit.grouped);
   const commitPages = meaningful.map((unit, index) => commitPageSection(unit, index, change, options)).join("");
-  const sections = `<section id="overview">${overviewView(book, change, meaningful)}</section><section id="architecture">${architectureView(book, change, options)}</section><section id="how-it-works">${howItWorksView(change)}</section><section id="more">${moreView(book, change)}</section>` + commitPages + `<section id="home">${homeView(meaningful, change)}</section>`;
+  const sections = `<section id="overview">${overviewView(book, change, meaningful)}</section><section id="architecture">${architectureView(book, change, options)}</section><section id="how-it-works">${howItWorksView(change)}</section><section id="issues">${issuesView(options)}</section><section id="more">${moreView(book, change)}</section>` + commitPages + `<section id="home">${homeView(meaningful, change)}</section>`;
   const displayName = options.repoName ?? change.repository.name;
   const title = escHtml(`${displayName} \u2014 change book`);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_CONTENT}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${stylesheet()}</style></head><body><a class="skip-link" href="#main">Skip to content</a><div class="layout">` + renderSidebar(TABS, "home", displayName) + `<main id="main">` + sections + `</main></div></body></html>`;
@@ -10445,6 +10586,62 @@ ${text}${text.endsWith("\n") ? "" : "\n"}\`\`\`
   return { svgs, notes };
 }
 
+// packages/cli/src/issues.ts
+import { readFile as readFile2, stat } from "node:fs/promises";
+import { join as join2 } from "node:path";
+var MAX_FILE_BYTES = 1e6;
+var MAX_ISSUES = 200;
+var MAX_TITLE_LENGTH = 500;
+var MAX_STATE_LENGTH = 50;
+var MAX_URL_LENGTH = 2e3;
+var MAX_DATE_LENGTH = 100;
+var MAX_ISSUE_NUMBER = 1e9;
+function readEntry(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const entry = raw;
+  const { number, title, state, url, createdAt } = entry;
+  if (typeof number !== "number" || !Number.isInteger(number) || number < 1 || number > MAX_ISSUE_NUMBER) {
+    return null;
+  }
+  if (typeof title !== "string" || title.length === 0) return null;
+  if (typeof state !== "string") return null;
+  if (typeof url !== "string" || url.length > MAX_URL_LENGTH) return null;
+  if (typeof createdAt !== "string") return null;
+  return {
+    number,
+    title: title.slice(0, MAX_TITLE_LENGTH),
+    state: state.slice(0, MAX_STATE_LENGTH),
+    url,
+    createdAt: createdAt.slice(0, MAX_DATE_LENGTH)
+  };
+}
+async function readIssues(outDir) {
+  const path = join2(outDir, "issues.json");
+  let raw;
+  try {
+    if ((await stat(path)).size > MAX_FILE_BYTES) return null;
+    raw = await readFile2(path, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const issues = [];
+  for (const entry of parsed) {
+    const issue = readEntry(entry);
+    if (issue !== null) {
+      issues.push(issue);
+      if (issues.length >= MAX_ISSUES) break;
+    }
+  }
+  return issues;
+}
+
 // packages/cli/src/repo-origin.ts
 var REMOTE_PROTOCOLS = /* @__PURE__ */ new Set(["http:", "https:", "ssh:", "git:", "git+ssh:"]);
 function repoWebUrlFromRemote(url) {
@@ -10539,7 +10736,7 @@ async function collectFacts(repoDir, fileChanges, headIsWorktree) {
     }
     if (fc.status !== "deleted") {
       try {
-        const content = fc.headBlob !== void 0 ? await blobContent(repoDir, fc.headBlob) : headIsWorktree ? await readFile2(join2(repoDir, fc.path), "utf8") : null;
+        const content = fc.headBlob !== void 0 ? await blobContent(repoDir, fc.headBlob) : headIsWorktree ? await readFile3(join3(repoDir, fc.path), "utf8") : null;
         if (content !== null) {
           analyzeOneSide(fc.path, content, headFacts, limitations);
         }
@@ -10560,7 +10757,7 @@ async function writeJson(path, value) {
 async function readJsonFile(path, hint) {
   let raw;
   try {
-    raw = await readFile2(path, "utf8");
+    raw = await readFile3(path, "utf8");
   } catch {
     throw new Error(`${path} not found \u2014 ${hint}`);
   }
@@ -10574,8 +10771,8 @@ async function readJsonFile(path, hint) {
 }
 function manifestPaths(outDir) {
   return {
-    change: join2(outDir, "manifests", "change.json"),
-    book: join2(outDir, "manifests", "book.json")
+    change: join3(outDir, "manifests", "change.json"),
+    book: join3(outDir, "manifests", "book.json")
   };
 }
 async function loadValidatedManifests(outDir) {
@@ -10624,13 +10821,22 @@ async function renderToDist(options) {
   const sources = collectMermaidSources(book, change, mermaidOptions);
   const { svgs, notes } = await prerender(sources, { outDir, allowedOrigins });
   for (const note of notes) io.out(note);
-  const html = renderChangeBook(book, change, {
+  const links = {
+    ...mermaidOptions.linkBase !== void 0 ? { linkBase: mermaidOptions.linkBase } : {},
+    ...repoOrigin !== null && originHost !== null ? { origin: repoOrigin } : {},
+    ...allowedOrigins.length > 0 ? { allowedOrigins } : {}
+  };
+  const issues = await readIssues(outDir);
+  const renderOptions = {
     renderDiagram: compileDiagram,
     ...options.repoName !== void 0 ? { repoName: options.repoName } : {},
-    mermaid: { ...mermaidOptions, svgs }
-  });
-  await mkdir2(join2(outDir, "dist"), { recursive: true });
-  const htmlPath = join2(outDir, "dist", "index.html");
+    mermaid: { ...mermaidOptions, svgs },
+    ...Object.keys(links).length > 0 ? { links } : {},
+    ...issues !== null ? { issues } : {}
+  };
+  const html = renderChangeBook(book, change, renderOptions);
+  await mkdir2(join3(outDir, "dist"), { recursive: true });
+  const htmlPath = join3(outDir, "dist", "index.html");
   await writeFile2(htmlPath, html, "utf8");
   io.out(`wrote ${htmlPath}`);
 }
@@ -10683,20 +10889,20 @@ async function runCompare(options) {
     );
   }
   const paths = manifestPaths(outDir);
-  await mkdir2(join2(outDir, "manifests"), { recursive: true });
+  await mkdir2(join3(outDir, "manifests"), { recursive: true });
   await writeJson(paths.change, manifest);
   io.out(`wrote ${paths.change}`);
   await writeJson(paths.book, book);
   io.out(`wrote ${paths.book}`);
   const request = buildNarrationRequest(manifest);
-  const requestPath = join2(outDir, "narration-request.json");
+  const requestPath = join3(outDir, "narration-request.json");
   await writeJson(requestPath, request);
   io.out(`wrote ${requestPath}`);
-  const responsePath = join2(outDir, "narration-response.json");
+  const responsePath = join3(outDir, "narration-response.json");
   let narrated;
   let responseRaw;
   try {
-    responseRaw = JSON.parse(await readFile2(responsePath, "utf8"));
+    responseRaw = JSON.parse(await readFile3(responsePath, "utf8"));
   } catch (error) {
     if (error.code !== "ENOENT") {
       throw new Error(
@@ -10785,10 +10991,10 @@ async function runInit(options) {
     [
       "",
       "Next steps (the story loop):",
-      `  1. Read ${join2(outDir, "narration-request.json")} \u2014 it lists the only entity/`,
+      `  1. Read ${join3(outDir, "narration-request.json")} \u2014 it lists the only entity/`,
       "     change-unit ids you may reference, the evidenceFiles inventory diagram",
       "     nodes must anchor to, and the diagram caps (diagramLimits).",
-      `  2. Write ${join2(outDir, "narration-response.json")} with the project summary,`,
+      `  2. Write ${join3(outDir, "narration-response.json")} with the project summary,`,
       "     chapters, architectureDiagram, and a story per change unit.",
       "  3. Run `gitiviz apply-narration` to validate, merge, and re-render the book."
     ].join("\n")
@@ -10813,7 +11019,7 @@ async function runValidate(options) {
 async function runApplyNarration(options) {
   const { outDir, io } = options;
   const { change, book } = await loadValidatedManifests(outDir);
-  const responsePath = join2(outDir, "narration-response.json");
+  const responsePath = join3(outDir, "narration-response.json");
   const responseRaw = await readJsonFile(
     responsePath,
     "write one from narration-request.json first"
@@ -10905,7 +11111,7 @@ async function runCli(argv, io = defaultIo, env = process.env) {
   }
   const [command, ...rest] = parsed.positionals;
   const repoDir = resolve2(parsed.repo ?? ".");
-  const outDir = resolve2(parsed.out ?? join3(repoDir, ".gitiviz"));
+  const outDir = resolve2(parsed.out ?? join4(repoDir, ".gitiviz"));
   const explicitName = [parsed.name, env["GITIVIZ_REPO_NAME"]].map((v) => v?.trim() ?? "").find((v) => v !== "") ?? void 0;
   const named = explicitName !== void 0 ? { repoName: explicitName } : {};
   const explicitOrigin = env["GITIVIZ_REPO_ORIGIN"]?.trim();

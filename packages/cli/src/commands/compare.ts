@@ -59,7 +59,8 @@ import {
   collectMermaidSources,
   compileDiagram,
   renderChangeBook,
-  type MermaidRenderOptions
+  type MermaidRenderOptions,
+  type RenderOptions
 } from "@gitiviz/renderer";
 import { prerenderMermaidDiagrams } from "../mermaid-prerender.js";
 import { readIssues } from "../issues.js";
@@ -329,10 +330,9 @@ export async function renderToDist(options: RenderToDistOptions): Promise<void> 
   // omit the option; [] is an honest "no tickets yet" the renderer shows.
   const issues = await readIssues(outDir);
 
-  // Built as a plain object (not an inline literal) so the CLI keeps
-  // compiling while the renderer's RenderOptions catches up with the
-  // links/issues contract fields.
-  const renderOptions = {
+  // Typed as the renderer's RenderOptions so the links/issues contract
+  // (RenderLinkOptions shape, IssueModel list) is enforced at compile time.
+  const renderOptions: RenderOptions = {
     renderDiagram: compileDiagram,
     ...(options.repoName !== undefined ? { repoName: options.repoName } : {}),
     mermaid: { ...mermaidOptions, svgs },
