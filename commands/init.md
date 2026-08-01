@@ -46,9 +46,12 @@ Read `.gitiviz/narration-request.json` and write
   `{ "clusters": [...], "nodes": [...], "edges": [...] }`. The quality bar is
   `${CLAUDE_PLUGIN_ROOT}/docs/visual-reference.mmd` — read it: 3–6 colored clusters that
   name subsystems in human terms, nodes as "Human name / role / [file]", and
-  verb-labeled edges that tell the flow. Every node `file` MUST be a real path
-  taken from the request's `evidenceFiles` list — fabricated anchors are
-  rejected. Respect `diagramLimits` (max 20 nodes, 6 clusters). NEVER produce
+  verb-labeled edges that tell the flow. Every node `file` MUST be a REAL path
+  in this repository: the request's `evidenceFiles` list is the safe default,
+  and any other file that exists at the analyzed head is accepted too (the
+  diagram describes the whole project, not just the rendered range).
+  Fabricated anchors are rejected. Respect `diagramLimits` (max 20 nodes,
+  6 clusters). NEVER produce
   a file/module "imports"/"contains" grid — concepts only.
 - `changeUnits` — a story for EVERY id in `allowedChangeUnitIds`:
   `humanTitle`, `summary`, `beforeDescription`, `afterDescription`,

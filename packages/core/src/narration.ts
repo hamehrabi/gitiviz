@@ -14,8 +14,10 @@
  *   - concept diagrams arrive as structured data (clusters/nodes/edges),
  *     never raw Mermaid — markup injection is impossible by construction.
  *     Architecture diagrams cap at 20 nodes / 6 clusters, story diagrams at
- *     7 nodes, and every node "file" must exist in the manifest's evidence
- *     index (fabricated paths are rejected with actionable errors);
+ *     7 nodes, and every node "file" must be REAL: either an evidence path in
+ *     this manifest or — when the caller supplies the repository's file list
+ *     (`projectFiles`) — a file that exists in the repository at the analyzed
+ *     head. Fabricated paths are rejected with actionable errors;
  *   - everything merged is stamped `provenance: "inferred"` — a response
  *     claiming any provenance (in particular "derived") is rejected, so AI
  *     output structurally cannot masquerade as deterministic fact;
@@ -145,8 +147,11 @@ export interface NarrationRequest {
   changeUnits: NarrationChangeUnitFact[];
   analysisLimitations: AnalysisLimitation[];
   /**
-   * Every evidence file path in the manifest, sorted. A diagram node's
-   * "file" must come from this list — anything else is rejected.
+   * Every evidence file path in the manifest, sorted — the anchors that are
+   * always safe for a diagram node's "file". Other paths are accepted only
+   * when they really exist in the repository at the analyzed head (a diagram
+   * describes the whole project, not just this range); fabricated paths are
+   * always rejected.
    */
   evidenceFiles: string[];
   /** Derived whole-range system rollup: real anchors for the architecture diagram. */
@@ -348,16 +353,47 @@ function checkUnknownKeys(
 }
 
 /**
+ * The paths a diagram node may anchor to — validated against REALITY, not
+ * against the window being rendered.
+ *
+ * A diagram (the architecture diagram above all) describes the whole project,
+ * so its anchors are legitimately files the rendered range never touched;
+ * anchoring it to "files changed in the last N commits" breaks the diagram
+ * every time the window slides. Two sets, two different questions:
+ *
+ *   - `evidence`: paths in this manifest's evidence index — always accepted;
+ *   - `project`:  paths that really exist in the repository at the analyzed
+ *                 head revision (supplied by the caller, which reads them
+ *                 through the safe git layer) — accepted as project-file
+ *                 anchors.
+ *
+ * A path in NEITHER is fabricated and is rejected, with the same message and
+ * the same exit code as before. `project` is optional on purpose: when the
+ * repository cannot be consulted (no repo dir, worktree head, git failure)
+ * nothing is verifiable, so the caller omits it and the strict
+ * evidence-index-only rule stands. The guard never weakens silently.
+ */
+interface AnchorFiles {
+  evidence: ReadonlySet<string>;
+  project?: ReadonlySet<string> | undefined;
+}
+
+/** Is this path a real anchor: in the manifest, or a real file in the repo? */
+function isRealAnchor(file: string, anchors: AnchorFiles): boolean {
+  return anchors.evidence.has(file) || (anchors.project?.has(file) ?? false);
+}
+
+/**
  * Validate a proposed concept diagram. Pushes actionable errors; returns a
  * normalized copy (never the raw input) only when the diagram is fully valid.
- * Every node "file" must exist in the manifest's evidence index — the
- * narrator cannot anchor a diagram to a fabricated path.
+ * Every node "file" must be a real anchor (see AnchorFiles) — the narrator
+ * cannot anchor a diagram to a fabricated path.
  */
 function checkDiagram(
   raw: unknown,
   where: string,
   caps: DiagramCaps,
-  evidenceFiles: Set<string>,
+  anchors: AnchorFiles,
   errors: string[]
 ): SanitizedDiagram | null {
   const before = errors.length;
@@ -456,7 +492,7 @@ function checkDiagram(
           errors.push(
             `${at}.file must be a repo-relative path string (≤ ${MAX_DIAGRAM_FILE_LENGTH} chars)`
           );
-        } else if (!evidenceFiles.has(file)) {
+        } else if (!isRealAnchor(file, anchors)) {
           errors.push(
             `${at}.file "${file.slice(0, 200)}" is not an evidence file in this manifest — ` +
               `pick a path from the request's evidenceFiles list or omit "file"`
@@ -529,7 +565,7 @@ function checkDiagram(
 
 /** Out-of-band channel for storyDiagrams validated inside checkRecord. */
 interface DiagramContext {
-  evidenceFiles: Set<string>;
+  anchors: AnchorFiles;
   sanitized: Map<Record<string, unknown>, SanitizedDiagram>;
 }
 
@@ -598,7 +634,7 @@ function checkRecord(
         value,
         `${where}.storyDiagram`,
         { maxNodes: MAX_STORY_DIAGRAM_NODES, maxClusters: MAX_DIAGRAM_CLUSTERS },
-        diagramContext.evidenceFiles,
+        diagramContext.anchors,
         errors
       );
       if (diagram === null) continue;
@@ -649,13 +685,78 @@ function stampInferred(record: Entity | ChangeUnit, confidence: unknown): void {
 }
 
 /**
+ * Every "file" a response's diagrams anchor to (architecture diagram and
+ * per-unit story diagrams), de-duplicated, in first-seen order. Tolerant of
+ * anything: malformed input simply yields fewer paths — validation is
+ * `applyNarration`'s job, never this one's.
+ */
+function diagramFileAnchors(response: unknown): string[] {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  const collect = (diagram: unknown): void => {
+    if (!isPlainObject(diagram)) return;
+    const nodes = diagram["nodes"];
+    if (!Array.isArray(nodes)) return;
+    for (const node of nodes) {
+      if (!isPlainObject(node)) continue;
+      const file = node["file"];
+      if (typeof file !== "string" || file.length === 0 || seen.has(file)) continue;
+      seen.add(file);
+      files.push(file);
+    }
+  };
+  if (!isPlainObject(response)) return files;
+  collect(response["architectureDiagram"]);
+  const units = response["changeUnits"];
+  if (Array.isArray(units)) {
+    for (const unit of units) {
+      if (isPlainObject(unit)) collect(unit["storyDiagram"]);
+    }
+  }
+  return files;
+}
+
+/**
+ * Diagram node anchors this manifest's evidence index does NOT cover.
+ *
+ * This is the cheap, pure question a caller asks BEFORE deciding whether the
+ * repository is worth reading: empty means every anchor is already grounded in
+ * the manifest, so `applyNarration` needs no `projectFiles` and no git call
+ * happens at all (the common path). Non-empty means at least one anchor is a
+ * whole-project reference — real or fabricated — and only the repository can
+ * tell those apart.
+ */
+export function outOfManifestDiagramFiles(
+  manifest: ChangeManifest,
+  response: unknown
+): string[] {
+  const evidence = collectEvidenceFiles(manifest);
+  return diagramFileAnchors(response).filter((file) => !evidence.has(file));
+}
+
+/** Extra grounding a caller can supply for validating diagram anchors. */
+export interface ApplyNarrationOptions {
+  /**
+   * Repo-relative paths that really exist in the repository at the analyzed
+   * head revision (`repoFilesAtRevision` in @gitiviz/git). Diagram nodes may
+   * anchor to these as well as to the manifest's evidence files, because a
+   * diagram describes the whole project rather than the rendered window.
+   *
+   * Omit it whenever the repository cannot be consulted: without it only
+   * evidence paths are accepted, exactly as before.
+   */
+  projectFiles?: ReadonlySet<string> | undefined;
+}
+
+/**
  * Validate a narrator response against the manifest and merge it. Returns
  * a new manifest (input untouched); any violation rejects the whole
  * response with an actionable error list. Never throws on malformed input.
  */
 export function applyNarration(
   manifest: ChangeManifest,
-  response: unknown
+  response: unknown,
+  options: ApplyNarrationOptions = {}
 ): ValidationResult<ChangeManifest> {
   const errors: string[] = [];
   if (!isPlainObject(response)) {
@@ -677,7 +778,10 @@ export function applyNarration(
   const validEntities: Record<string, unknown>[] = [];
   const validUnits: Record<string, unknown>[] = [];
   const diagramContext: DiagramContext = {
-    evidenceFiles: collectEvidenceFiles(manifest),
+    anchors: {
+      evidence: collectEvidenceFiles(manifest),
+      project: options.projectFiles
+    },
     sanitized: new Map()
   };
 
@@ -725,7 +829,7 @@ export function applyNarration(
       response["architectureDiagram"],
       "architectureDiagram",
       { maxNodes: MAX_ARCHITECTURE_DIAGRAM_NODES, maxClusters: MAX_DIAGRAM_CLUSTERS },
-      diagramContext.evidenceFiles,
+      diagramContext.anchors,
       errors
     );
   }

@@ -274,6 +274,121 @@ describe("narration-response handling", () => {
     expect(io.errText()).toContain("allowed ids");
   }, 60_000);
 
+  // An architecture diagram describes the WHOLE PROJECT, so its node anchors
+  // are legitimately files no commit in the rendered window touched. This is
+  // the exact shape of the real failure: a committed narration response whose
+  // diagram anchors survive the window sliding.
+  describe("diagram anchors on real project files outside the range", () => {
+    /** Files that exist at the feature head but the last commit never touched. */
+    const UNCHANGED_PROJECT_FILES = [
+      "src/db/schema.sql",
+      "src/services/checkoutService.ts"
+    ];
+
+    const architectureDiagram = (files: string[]) => ({
+      clusters: [{ id: "core", title: "Core", tone: "blue" }],
+      // Single-word labels: the rendered SVG splits multi-word labels
+      // across elements, so one token is what an HTML assertion can see.
+      nodes: files.map((file, index) => ({
+        id: `n-${index}`,
+        cluster: "core",
+        humanLabel: `Anchored${index}`,
+        role: "part of the system",
+        file
+      })),
+      edges: []
+    });
+
+    /** Render ONE commit — the narrowest window there is. */
+    async function narrowRange(): Promise<string> {
+      const narrow = await newOutDir();
+      const io = captureIo();
+      expect(
+        await runCli(["commit", featureSha, "--repo", demoRepo, "--out", narrow], io),
+        io.errText()
+      ).toBe(0);
+      const request = (await readJson(join(narrow, "narration-request.json"))) as {
+        evidenceFiles: string[];
+      };
+      for (const file of UNCHANGED_PROJECT_FILES) {
+        expect(request.evidenceFiles).not.toContain(file);
+      }
+      return narrow;
+    }
+
+    it("renders a narrow range whose diagram anchors are unchanged project files", async () => {
+      const narrow = await narrowRange();
+      await writeFile(
+        join(narrow, "narration-response.json"),
+        JSON.stringify({
+          architectureDiagram: architectureDiagram([
+            "src/routes/orders.ts", // in range: an evidence file
+            ...UNCHANGED_PROJECT_FILES // real, but this commit never touched them
+          ])
+        }),
+        "utf8"
+      );
+      const io = captureIo();
+      const exitCode = await runCli(
+        ["apply-narration", "--repo", demoRepo, "--out", narrow],
+        io
+      );
+      expect(exitCode, io.errText()).toBe(0);
+      expect(io.outText()).toContain("2 diagram anchors point at project files");
+      const html = await readFile(join(narrow, "dist", "index.html"), "utf8");
+      // The project-file nodes really made it into the rendered diagram.
+      expect(html).toContain("Anchored1");
+      expect(html).toContain("Anchored2");
+    }, 60_000);
+
+    it("still rejects a fabricated anchor alongside real ones", async () => {
+      const narrow = await narrowRange();
+      await writeFile(
+        join(narrow, "narration-response.json"),
+        JSON.stringify({
+          architectureDiagram: architectureDiagram([
+            ...UNCHANGED_PROJECT_FILES,
+            "src/backdoor.ts"
+          ])
+        }),
+        "utf8"
+      );
+      const io = captureIo();
+      const exitCode = await runCli(
+        ["apply-narration", "--repo", demoRepo, "--out", narrow],
+        io
+      );
+      expect(exitCode).toBe(1);
+      expect(io.errText()).toContain("src/backdoor.ts");
+      expect(io.errText()).toContain("is not an evidence file in this manifest");
+      // The real anchors are never named as errors.
+      for (const file of UNCHANGED_PROJECT_FILES) {
+        expect(io.errText()).not.toContain(file);
+      }
+    }, 60_000);
+
+    it("stays strict when the repository cannot be consulted", async () => {
+      const narrow = await narrowRange();
+      await writeFile(
+        join(narrow, "narration-response.json"),
+        JSON.stringify({
+          architectureDiagram: architectureDiagram(UNCHANGED_PROJECT_FILES)
+        }),
+        "utf8"
+      );
+      const io = captureIo();
+      // --repo points at a directory that is not a repository, so the head
+      // tree cannot be read: nothing is verifiable and the evidence-only
+      // rule stands. The guard never weakens silently.
+      const exitCode = await runCli(
+        ["apply-narration", "--repo", await newOutDir(), "--out", narrow],
+        io
+      );
+      expect(exitCode).toBe(1);
+      expect(io.errText()).toContain("is not an evidence file in this manifest");
+    }, 60_000);
+  });
+
   it("apply-narration re-renders from manifests on disk without re-analyzing", async () => {
     const request = (await readJson(join(out, "narration-request.json"))) as {
       allowedChangeUnitIds: string[];

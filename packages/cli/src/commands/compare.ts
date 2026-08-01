@@ -29,6 +29,7 @@ import {
   diffRange,
   gitRaw,
   mergeBase,
+  repoFilesAtRevision,
   resolveRef,
   WORKTREE,
   type FileChange
@@ -47,7 +48,8 @@ import {
   buildChangeUnits,
   buildEvidenceGraph,
   buildNarrationRequest,
-  knownChangeUnitIds
+  knownChangeUnitIds,
+  outOfManifestDiagramFiles
 } from "@gitiviz/core";
 import {
   validateBookManifest,
@@ -316,6 +318,47 @@ async function scopeToRange(
   return { response: { ...(response as object), changeUnits: kept }, setAside };
 }
 
+/**
+ * The repository's real file list at the analyzed head — but only when a
+ * diagram actually needs it.
+ *
+ * Same principle as `scopeToRange`, applied to the other thing the narration
+ * response outlives its range in: diagram node anchors. An architecture
+ * diagram describes the WHOLE PROJECT, so its nodes legitimately point at
+ * files no commit in this window touched; validating them against "files
+ * changed in the last N commits" breaks the diagram every time the window
+ * slides. The repository is the only authority on which of those paths are
+ * real, so:
+ *
+ *   - every anchor already in the manifest → nothing to verify, no git call;
+ *   - some anchor outside it               → read the head tree ONCE and let
+ *                                            `applyNarration` accept the real
+ *                                            files and reject the rest;
+ *   - repository unavailable (no repoDir, WORKTREE head, git failure)
+ *                                          → return undefined: nothing is
+ *                                            verifiable, so the strict
+ *                                            evidence-only rule stands.
+ *
+ * The result is passed as `projectFiles` and covers every diagram in the
+ * response (architecture and per-unit story diagrams) in one read.
+ */
+async function projectFileAnchors(
+  change: ChangeManifest,
+  outOfManifest: readonly string[],
+  repoDir: string | undefined
+): Promise<ReadonlySet<string> | undefined> {
+  if (outOfManifest.length === 0) return undefined;
+  if (repoDir === undefined) return undefined;
+  // A worktree head is not a revision git can list a tree for.
+  if (change.headRevision === WORKTREE) return undefined;
+  try {
+    return await repoFilesAtRevision(repoDir, change.headRevision);
+  } catch {
+    // Cannot verify anything: stay strict, let the validator speak.
+    return undefined;
+  }
+}
+
 /** Merge a narration response into the manifest or fail with the error list. */
 async function mergeNarration(
   change: ChangeManifest,
@@ -332,7 +375,19 @@ async function mergeNarration(
         "outside this range"
     );
   }
-  const merged = applyNarration(change, scoped.response);
+  const outOfManifest = outOfManifestDiagramFiles(change, scoped.response);
+  const projectFiles = await projectFileAnchors(change, outOfManifest, repoDir);
+  if (projectFiles !== undefined) {
+    const anchored = outOfManifest.filter((file) => projectFiles.has(file));
+    if (anchored.length > 0) {
+      io.out(
+        `narration: ${anchored.length} diagram ` +
+          `${anchored.length === 1 ? "anchor points" : "anchors point"} at project ` +
+          "files unchanged in this range"
+      );
+    }
+  }
+  const merged = applyNarration(change, scoped.response, { projectFiles });
   if (!merged.ok) {
     throw new Error(`${source} rejected:\n  - ${merged.errors.join("\n  - ")}`);
   }
@@ -697,10 +752,11 @@ export interface ApplyNarrationOptions {
   outDir: string;
   /**
    * The analyzed repository directory. Used to derive the web origin for
-   * diagram click links from the origin remote, and to verify narration ids
-   * that fall outside the rendered range against real commits. Optional:
+   * diagram click links from the origin remote, and to verify what falls
+   * outside the rendered range against reality: narration ids against real
+   * commits, diagram file anchors against the real head tree. Optional:
    * without it (and without GITIVIZ_REPO_ORIGIN) diagrams carry no links and
-   * out-of-range ids cannot be verified, so they are rejected as before.
+   * nothing out-of-range can be verified, so it is rejected as before.
    */
   repoDir?: string;
   /**

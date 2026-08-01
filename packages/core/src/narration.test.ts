@@ -5,6 +5,7 @@ import {
   applyNarration,
   applyTemplateNarration,
   buildNarrationRequest,
+  outOfManifestDiagramFiles,
   templateNarrator
 } from "./narration.js";
 
@@ -406,6 +407,143 @@ describe("applyNarration — concept diagrams", () => {
         (e) => e.includes("src/does-not-exist.ts") && e.includes("evidence")
       )
     ).toBe(true);
+  });
+
+  // A diagram describes the WHOLE PROJECT, so its anchors are legitimately
+  // files the rendered range never touched. Three-way rule, checked against
+  // reality rather than against the window:
+  //   in the manifest            → accepted (unchanged);
+  //   real file in the repository → accepted as a project-file anchor;
+  //   neither                     → fabricated, rejected as before.
+  describe("project-file anchors", () => {
+    const projectFiles = new Set([
+      "src/routes/orders.ts",
+      "src/db/schema.sql",
+      "src/services/orderService.ts"
+    ]);
+
+    it("accepts an anchor that is an evidence file in this manifest", () => {
+      const result = applyNarration(
+        makeManifest(),
+        { architectureDiagram: makeArchitectureDiagram() },
+        { projectFiles }
+      );
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.architectureDiagram!.nodes[0]!.file).toBe(
+        "src/routes/orders.ts"
+      );
+    });
+
+    it("accepts an anchor on a real repository file the range never changed", () => {
+      const diagram = makeArchitectureDiagram();
+      // Not in the fixture's evidence index; real in the repository.
+      diagram.nodes[0]!.file = "src/db/schema.sql";
+      const result = applyNarration(
+        makeManifest(),
+        { architectureDiagram: diagram },
+        { projectFiles }
+      );
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.architectureDiagram!.nodes[0]!.file).toBe(
+        "src/db/schema.sql"
+      );
+      expect(validateChangeManifest(result.value).ok).toBe(true);
+    });
+
+    it("still rejects a fabricated anchor with the same error", () => {
+      const diagram = makeArchitectureDiagram();
+      diagram.nodes[0]!.file = "src/backdoor.ts";
+      const result = applyNarration(
+        makeManifest(),
+        { architectureDiagram: diagram },
+        { projectFiles }
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(
+        result.errors.some(
+          (e) => e.includes("src/backdoor.ts") && e.includes("evidence")
+        )
+      ).toBe(true);
+    });
+
+    /** The story diagram fixture with its first node anchored to `file`. */
+    const storyAnchoredTo = (file: string) => ({
+      nodes: [
+        { id: "s-route", humanLabel: "Order intake", role: "new route", file },
+        { id: "s-guests", humanLabel: "Guests", role: "can now order" }
+      ],
+      edges: [{ from: "s-guests", to: "s-route", verb: "now use" }]
+    });
+
+    it("applies the same rule to per-unit story diagrams", () => {
+      expect(
+        applyNarration(
+          makeManifest(),
+          {
+            changeUnits: [
+              { id: "unit-1", storyDiagram: storyAnchoredTo("src/db/schema.sql") }
+            ]
+          },
+          { projectFiles }
+        ).ok
+      ).toBe(true);
+      expect(
+        applyNarration(
+          makeManifest(),
+          {
+            changeUnits: [
+              { id: "unit-1", storyDiagram: storyAnchoredTo("src/backdoor.ts") }
+            ]
+          },
+          { projectFiles }
+        ).ok
+      ).toBe(false);
+      // Without a verified repository file list, both stay rejected.
+      expect(
+        applyNarration(makeManifest(), {
+          changeUnits: [
+            { id: "unit-1", storyDiagram: storyAnchoredTo("src/db/schema.sql") }
+          ]
+        }).ok
+      ).toBe(false);
+    });
+
+    it("stays strict when the repository could not be consulted", () => {
+      const diagram = makeArchitectureDiagram();
+      diagram.nodes[0]!.file = "src/db/schema.sql";
+      // No projectFiles: nothing is verifiable, so evidence-only stands.
+      const result = applyNarration(makeManifest(), {
+        architectureDiagram: diagram
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it("names exactly the anchors the manifest cannot ground", () => {
+      const diagram = makeArchitectureDiagram();
+      diagram.nodes[1] = { ...diagram.nodes[1]!, file: "src/db/schema.sql" };
+      expect(
+        outOfManifestDiagramFiles(makeManifest(), {
+          architectureDiagram: diagram,
+          changeUnits: [
+            { id: "unit-1", storyDiagram: storyAnchoredTo("src/backdoor.ts") }
+          ]
+        })
+      ).toEqual(["src/db/schema.sql", "src/backdoor.ts"]);
+      // Every anchor already in the manifest: nothing to verify, so callers
+      // do no repository work at all.
+      expect(
+        outOfManifestDiagramFiles(makeManifest(), {
+          architectureDiagram: makeArchitectureDiagram()
+        })
+      ).toEqual([]);
+      // Malformed input yields paths, never throws.
+      for (const malformed of [null, 42, "flowchart TD; a-->b", { architectureDiagram: 1 }]) {
+        expect(outOfManifestDiagramFiles(makeManifest(), malformed)).toEqual([]);
+      }
+    });
   });
 
   it("rejects an architecture diagram over the 20-node cap", () => {

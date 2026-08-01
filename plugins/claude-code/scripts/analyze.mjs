@@ -6688,6 +6688,27 @@ async function remoteOriginUrl(repoDir) {
   }
 }
 
+// packages/git/src/tree.ts
+var MAX_TREE_FILES = 5e4;
+async function repoFilesAtRevision(repoDir, rev) {
+  const sha = await resolveRef(repoDir, rev);
+  const { stdout } = await gitRaw(repoDir, [
+    "ls-tree",
+    "-r",
+    "-z",
+    "--name-only",
+    "--full-tree",
+    sha
+  ]);
+  const files = /* @__PURE__ */ new Set();
+  for (const path of stdout.split("\0")) {
+    if (path.length === 0) continue;
+    files.add(path);
+    if (files.size >= MAX_TREE_FILES) break;
+  }
+  return files;
+}
+
 // packages/git/src/diff.ts
 var WORKTREE = "WORKTREE";
 var SHA402 = /^[0-9a-f]{40}$/;
@@ -8342,7 +8363,10 @@ function checkUnknownKeys(raw, where, allowed, whatItHas, errors) {
     }
   }
 }
-function checkDiagram(raw, where, caps, evidenceFiles2, errors) {
+function isRealAnchor(file, anchors) {
+  return anchors.evidence.has(file) || (anchors.project?.has(file) ?? false);
+}
+function checkDiagram(raw, where, caps, anchors, errors) {
   const before = errors.length;
   if (!isPlainObject2(raw)) {
     errors.push(
@@ -8432,7 +8456,7 @@ function checkDiagram(raw, where, caps, evidenceFiles2, errors) {
           errors.push(
             `${at}.file must be a repo-relative path string (\u2264 ${MAX_DIAGRAM_FILE_LENGTH} chars)`
           );
-        } else if (!evidenceFiles2.has(file)) {
+        } else if (!isRealAnchor(file, anchors)) {
           errors.push(
             `${at}.file "${file.slice(0, 200)}" is not an evidence file in this manifest \u2014 pick a path from the request's evidenceFiles list or omit "file"`
           );
@@ -8537,7 +8561,7 @@ function checkRecord(raw, where, slots, allowedIds, seenIds, errors, diagramCont
         value,
         `${where}.storyDiagram`,
         { maxNodes: MAX_STORY_DIAGRAM_NODES, maxClusters: MAX_DIAGRAM_CLUSTERS },
-        diagramContext.evidenceFiles,
+        diagramContext.anchors,
         errors
       );
       if (diagram === null) continue;
@@ -8580,7 +8604,36 @@ function stampInferred(record, confidence) {
     delete record.confidence;
   }
 }
-function applyNarration(manifest, response) {
+function diagramFileAnchors(response) {
+  const files = [];
+  const seen = /* @__PURE__ */ new Set();
+  const collect = (diagram) => {
+    if (!isPlainObject2(diagram)) return;
+    const nodes = diagram["nodes"];
+    if (!Array.isArray(nodes)) return;
+    for (const node of nodes) {
+      if (!isPlainObject2(node)) continue;
+      const file = node["file"];
+      if (typeof file !== "string" || file.length === 0 || seen.has(file)) continue;
+      seen.add(file);
+      files.push(file);
+    }
+  };
+  if (!isPlainObject2(response)) return files;
+  collect(response["architectureDiagram"]);
+  const units = response["changeUnits"];
+  if (Array.isArray(units)) {
+    for (const unit of units) {
+      if (isPlainObject2(unit)) collect(unit["storyDiagram"]);
+    }
+  }
+  return files;
+}
+function outOfManifestDiagramFiles(manifest, response) {
+  const evidence = collectEvidenceFiles(manifest);
+  return diagramFileAnchors(response).filter((file) => !evidence.has(file));
+}
+function applyNarration(manifest, response, options = {}) {
   const errors = [];
   if (!isPlainObject2(response)) {
     return {
@@ -8600,7 +8653,10 @@ function applyNarration(manifest, response) {
   const validEntities = [];
   const validUnits = [];
   const diagramContext = {
-    evidenceFiles: collectEvidenceFiles(manifest),
+    anchors: {
+      evidence: collectEvidenceFiles(manifest),
+      project: options.projectFiles
+    },
     sanitized: /* @__PURE__ */ new Map()
   };
   const rawEntities = response["entities"] ?? [];
@@ -8644,7 +8700,7 @@ function applyNarration(manifest, response) {
       response["architectureDiagram"],
       "architectureDiagram",
       { maxNodes: MAX_ARCHITECTURE_DIAGRAM_NODES, maxClusters: MAX_DIAGRAM_CLUSTERS },
-      diagramContext.evidenceFiles,
+      diagramContext.anchors,
       errors
     );
   }
@@ -10839,6 +10895,16 @@ async function scopeToRange(change, response, repoDir) {
   if (setAside.length === 0) return { response, setAside: [] };
   return { response: { ...response, changeUnits: kept }, setAside };
 }
+async function projectFileAnchors(change, outOfManifest, repoDir) {
+  if (outOfManifest.length === 0) return void 0;
+  if (repoDir === void 0) return void 0;
+  if (change.headRevision === WORKTREE) return void 0;
+  try {
+    return await repoFilesAtRevision(repoDir, change.headRevision);
+  } catch {
+    return void 0;
+  }
+}
 async function mergeNarration(change, response, source, io, repoDir) {
   const scoped = await scopeToRange(change, response, repoDir);
   if (scoped.setAside.length > 0) {
@@ -10846,7 +10912,17 @@ async function mergeNarration(change, response, source, io, repoDir) {
       `narration: set aside ${scoped.setAside.length} ${scoped.setAside.length === 1 ? "story" : "stories"} about commits outside this range`
     );
   }
-  const merged = applyNarration(change, scoped.response);
+  const outOfManifest = outOfManifestDiagramFiles(change, scoped.response);
+  const projectFiles = await projectFileAnchors(change, outOfManifest, repoDir);
+  if (projectFiles !== void 0) {
+    const anchored = outOfManifest.filter((file) => projectFiles.has(file));
+    if (anchored.length > 0) {
+      io.out(
+        `narration: ${anchored.length} diagram ${anchored.length === 1 ? "anchor points" : "anchors point"} at project files unchanged in this range`
+      );
+    }
+  }
+  const merged = applyNarration(change, scoped.response, { projectFiles });
   if (!merged.ok) {
     throw new Error(`${source} rejected:
   - ${merged.errors.join("\n  - ")}`);
