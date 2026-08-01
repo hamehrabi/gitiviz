@@ -7476,6 +7476,15 @@ async function buildChangeUnits(input) {
 }
 
 // packages/schema/src/types.ts
+var DIAGRAM_TONES = [
+  "neutral",
+  "blue",
+  "amber",
+  "mint",
+  "rose",
+  "violet"
+];
+var NARRATED_CHAPTER_IDS = ["purpose", "systems", "flows"];
 var CHAPTER_IDS = [
   "purpose",
   "journeys",
@@ -7550,7 +7559,20 @@ var book_manifest_schema_default = {
     },
     chapterStatus: {
       type: "string",
-      enum: ["generated", "curated", "not-written"]
+      enum: ["generated", "curated", "narrated", "not-written"]
+    },
+    chapterNarration: {
+      type: "object",
+      required: ["summary"],
+      additionalProperties: false,
+      properties: {
+        summary: { type: "string", minLength: 1, maxLength: 4e3 },
+        keyPoints: {
+          type: "array",
+          maxItems: 5,
+          items: { type: "string", minLength: 1, maxLength: 4e3 }
+        }
+      }
     },
     chapter: {
       type: "object",
@@ -7559,7 +7581,8 @@ var book_manifest_schema_default = {
       properties: {
         id: { $ref: "#/definitions/chapterId" },
         title: { type: "string", minLength: 1 },
-        status: { $ref: "#/definitions/chapterStatus" }
+        status: { $ref: "#/definitions/chapterStatus" },
+        narration: { $ref: "#/definitions/chapterNarration" }
       }
     }
   }
@@ -7618,6 +7641,17 @@ var change_manifest_schema_default = {
     analysisLimitations: {
       type: "array",
       items: { $ref: "#/definitions/analysisLimitation" }
+    },
+    architectureDiagram: { $ref: "#/definitions/architectureDiagram" },
+    projectNarration: { $ref: "#/definitions/projectNarration" },
+    chapterNarrations: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        purpose: { $ref: "#/definitions/chapterNarration" },
+        systems: { $ref: "#/definitions/chapterNarration" },
+        flows: { $ref: "#/definitions/chapterNarration" }
+      }
     }
   },
   definitions: {
@@ -7740,12 +7774,152 @@ var change_manifest_schema_default = {
           type: "array",
           items: { type: "string" }
         },
+        storyDiagram: { $ref: "#/definitions/storyDiagram" },
         provenance: { $ref: "#/definitions/provenance" },
         confidence: { $ref: "#/definitions/confidence" },
         evidence: {
           type: "array",
           items: { $ref: "#/definitions/evidenceAnchor" }
         }
+      },
+      if: {
+        properties: { provenance: { const: "inferred" } },
+        required: ["provenance"]
+      },
+      else: {
+        not: { required: ["confidence"] }
+      }
+    },
+    diagramTone: {
+      type: "string",
+      enum: ["neutral", "blue", "amber", "mint", "rose", "violet"]
+    },
+    diagramCluster: {
+      type: "object",
+      required: ["id", "title", "tone"],
+      additionalProperties: false,
+      properties: {
+        id: { type: "string", minLength: 1, maxLength: 200 },
+        title: { type: "string", minLength: 1, maxLength: 200 },
+        tone: { $ref: "#/definitions/diagramTone" }
+      }
+    },
+    diagramNode: {
+      type: "object",
+      required: ["id", "humanLabel", "role"],
+      additionalProperties: false,
+      properties: {
+        id: { type: "string", minLength: 1, maxLength: 200 },
+        cluster: { type: "string", minLength: 1, maxLength: 200 },
+        humanLabel: { type: "string", minLength: 1, maxLength: 200 },
+        role: { type: "string", minLength: 1, maxLength: 200 },
+        file: { type: "string", minLength: 1, maxLength: 500 }
+      }
+    },
+    diagramEdge: {
+      type: "object",
+      required: ["from", "to", "verb"],
+      additionalProperties: false,
+      properties: {
+        from: { type: "string", minLength: 1, maxLength: 200 },
+        to: { type: "string", minLength: 1, maxLength: 200 },
+        verb: { type: "string", minLength: 1, maxLength: 200 }
+      }
+    },
+    architectureDiagram: {
+      type: "object",
+      required: ["nodes", "edges", "provenance"],
+      additionalProperties: false,
+      properties: {
+        clusters: {
+          type: "array",
+          maxItems: 6,
+          items: { $ref: "#/definitions/diagramCluster" }
+        },
+        nodes: {
+          type: "array",
+          minItems: 1,
+          maxItems: 20,
+          items: { $ref: "#/definitions/diagramNode" }
+        },
+        edges: {
+          type: "array",
+          maxItems: 60,
+          items: { $ref: "#/definitions/diagramEdge" }
+        },
+        provenance: { $ref: "#/definitions/provenance" },
+        confidence: { $ref: "#/definitions/confidence" }
+      },
+      if: {
+        properties: { provenance: { const: "inferred" } },
+        required: ["provenance"]
+      },
+      else: {
+        not: { required: ["confidence"] }
+      }
+    },
+    storyDiagram: {
+      type: "object",
+      required: ["nodes", "edges", "provenance"],
+      additionalProperties: false,
+      properties: {
+        clusters: {
+          type: "array",
+          maxItems: 6,
+          items: { $ref: "#/definitions/diagramCluster" }
+        },
+        nodes: {
+          type: "array",
+          minItems: 1,
+          maxItems: 7,
+          items: { $ref: "#/definitions/diagramNode" }
+        },
+        edges: {
+          type: "array",
+          maxItems: 21,
+          items: { $ref: "#/definitions/diagramEdge" }
+        },
+        provenance: { $ref: "#/definitions/provenance" },
+        confidence: { $ref: "#/definitions/confidence" }
+      },
+      if: {
+        properties: { provenance: { const: "inferred" } },
+        required: ["provenance"]
+      },
+      else: {
+        not: { required: ["confidence"] }
+      }
+    },
+    projectNarration: {
+      type: "object",
+      required: ["summary", "provenance"],
+      additionalProperties: false,
+      properties: {
+        summary: { type: "string", minLength: 1, maxLength: 4e3 },
+        provenance: { $ref: "#/definitions/provenance" },
+        confidence: { $ref: "#/definitions/confidence" }
+      },
+      if: {
+        properties: { provenance: { const: "inferred" } },
+        required: ["provenance"]
+      },
+      else: {
+        not: { required: ["confidence"] }
+      }
+    },
+    chapterNarration: {
+      type: "object",
+      required: ["summary", "provenance"],
+      additionalProperties: false,
+      properties: {
+        summary: { type: "string", minLength: 1, maxLength: 4e3 },
+        keyPoints: {
+          type: "array",
+          maxItems: 5,
+          items: { type: "string", minLength: 1, maxLength: 4e3 }
+        },
+        provenance: { $ref: "#/definitions/provenance" },
+        confidence: { $ref: "#/definitions/confidence" }
       },
       if: {
         properties: { provenance: { const: "inferred" } },
@@ -7823,7 +7997,12 @@ var CHAPTER_TITLES = {
   decisions: "Decisions",
   history: "How it got here"
 };
+function narrationFor(id, manifest) {
+  if (!NARRATED_CHAPTER_IDS.includes(id)) return void 0;
+  return manifest.chapterNarrations?.[id];
+}
 function chapterStatus(id, manifest) {
+  if (narrationFor(id, manifest) !== void 0) return "narrated";
   switch (id) {
     case "purpose":
       return "generated";
@@ -7839,18 +8018,197 @@ function buildBookManifest(manifest) {
   return {
     specVersion: manifest.specVersion,
     repository: { name: manifest.repository.name },
-    chapters: CHAPTER_IDS.map((id) => ({
-      id,
-      title: CHAPTER_TITLES[id],
-      status: chapterStatus(id, manifest)
-    }))
+    chapters: CHAPTER_IDS.map((id) => {
+      const chapter = {
+        id,
+        title: CHAPTER_TITLES[id],
+        status: chapterStatus(id, manifest)
+      };
+      const narration = narrationFor(id, manifest);
+      if (narration !== void 0) {
+        chapter.narration = { summary: narration.summary };
+        if (narration.keyPoints !== void 0) {
+          chapter.narration.keyPoints = [...narration.keyPoints];
+        }
+      }
+      return chapter;
+    })
   };
+}
+
+// packages/core/src/storyProjection.ts
+var MAX_STORY_NODES = 7;
+var CONTAINER_KINDS = /* @__PURE__ */ new Set(["system", "component"]);
+var OTHER_NODE_ID = "story:other";
+var OVERFLOW_NODE_ID = "story:overflow";
+function isContainer(entity) {
+  return CONTAINER_KINDS.has(entity.kind);
+}
+function isChanged(state) {
+  return state !== "unchanged";
+}
+function resolveOwners(entities, relationships) {
+  const byId2 = new Map(entities.map((e) => [e.id, e]));
+  const owner = /* @__PURE__ */ new Map();
+  const direct = [...relationships].filter((r) => {
+    const from = byId2.get(r.from);
+    return r.verb === "contains" && from !== void 0 && isContainer(from);
+  }).sort((a, b) => a.from < b.from ? -1 : a.from > b.from ? 1 : 0);
+  for (const r of direct) {
+    if (!owner.has(r.to)) owner.set(r.to, r.from);
+  }
+  const incoming = /* @__PURE__ */ new Map();
+  for (const r of relationships) {
+    if (r.verb === "contains") continue;
+    const bucket = incoming.get(r.to);
+    if (bucket) bucket.push(r);
+    else incoming.set(r.to, [r]);
+  }
+  for (; ; ) {
+    let progressed = false;
+    for (const e of entities) {
+      if (owner.has(e.id) || isContainer(e)) continue;
+      const candidates = (incoming.get(e.id) ?? []).filter((r) => owner.has(r.from)).sort((a, b) => {
+        const rankA = a.verb === "defines" ? 0 : 1;
+        const rankB = b.verb === "defines" ? 0 : 1;
+        if (rankA !== rankB) return rankA - rankB;
+        const ownA = owner.get(a.from);
+        const ownB = owner.get(b.from);
+        if (ownA !== ownB) return ownA < ownB ? -1 : 1;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+      if (candidates.length > 0) {
+        owner.set(e.id, owner.get(candidates[0].from));
+        progressed = true;
+      }
+    }
+    if (!progressed) break;
+  }
+  return owner;
+}
+var STATE_TIE_ORDER = ["added", "changed", "removed"];
+function dominantState(states) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const s of states) counts.set(s, (counts.get(s) ?? 0) + 1);
+  let best = "changed";
+  let bestCount = -1;
+  for (const s of STATE_TIE_ORDER) {
+    const c = counts.get(s) ?? 0;
+    if (c > bestCount) {
+      best = s;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+function plainVerb(verb, state) {
+  const base = verb === "imports" || verb === "depends on" ? "uses" : verb;
+  if (state === "added") return `now ${base}`;
+  if (state === "removed") return `no longer ${base}`;
+  return base;
+}
+function project(entities, relationships, keepLeaf, keepRelationship) {
+  const byId2 = new Map(entities.map((e) => [e.id, e]));
+  const owner = resolveOwners(entities, relationships);
+  const buckets = /* @__PURE__ */ new Map();
+  for (const e of entities) {
+    if (isContainer(e) || !isChanged(e.headState) || !keepLeaf(e.id)) continue;
+    const key = owner.get(e.id) ?? OTHER_NODE_ID;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(e.headState);
+    else buckets.set(key, [e.headState]);
+  }
+  let nodes = [...buckets.entries()].map(([key, states]) => {
+    const container = byId2.get(key);
+    return {
+      id: key,
+      kind: container?.kind ?? "other",
+      humanLabel: container?.humanLabel ?? "Other changes",
+      changeState: dominantState(states),
+      count: states.length
+    };
+  });
+  nodes.sort((a, b) => {
+    if (a.count !== b.count) return b.count - a.count;
+    if (a.humanLabel !== b.humanLabel) return a.humanLabel < b.humanLabel ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  if (nodes.length > MAX_STORY_NODES) {
+    const kept = nodes.slice(0, MAX_STORY_NODES - 1);
+    const folded = nodes.slice(MAX_STORY_NODES - 1);
+    const foldedStates = folded.flatMap((n) => buckets.get(n.id) ?? []);
+    kept.push({
+      id: OVERFLOW_NODE_ID,
+      kind: "overflow",
+      humanLabel: `\u2026and ${folded.length} more areas`,
+      changeState: dominantState(foldedStates),
+      count: folded.reduce((sum, n) => sum + n.count, 0)
+    });
+    nodes = kept;
+  }
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const nodeOf = (entityId2) => {
+    const e = byId2.get(entityId2);
+    if (e === void 0) return void 0;
+    const key = isContainer(e) ? e.id : owner.get(e.id) ?? OTHER_NODE_ID;
+    return nodeIds.has(key) ? key : void 0;
+  };
+  const seen = /* @__PURE__ */ new Set();
+  const edges = [];
+  for (const r of relationships) {
+    if (r.verb === "contains" || !isChanged(r.headState) || !keepRelationship(r)) continue;
+    const from = nodeOf(r.from);
+    const to = nodeOf(r.to);
+    if (from === void 0 || to === void 0 || from === to) continue;
+    const verb = plainVerb(r.verb, r.headState);
+    const key = `${from}\0${to}\0${verb}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    edges.push({ from, to, verb });
+  }
+  edges.sort((a, b) => {
+    if (a.from !== b.from) return a.from < b.from ? -1 : 1;
+    if (a.to !== b.to) return a.to < b.to ? -1 : 1;
+    return a.verb < b.verb ? -1 : a.verb > b.verb ? 1 : 0;
+  });
+  return { nodes, edges };
+}
+function buildOverviewStory(entities, relationships) {
+  return project(entities, relationships, () => true, () => true);
+}
+function buildUnitStory(unit, entities, relationships) {
+  const attached = new Set(unit.entities ?? []);
+  return project(
+    entities,
+    relationships,
+    (id) => attached.has(id),
+    (r) => attached.has(r.from) && attached.has(r.to)
+  );
 }
 
 // packages/core/src/narration.ts
 var MAX_NARRATION_LENGTH = 4e3;
 var MAX_OPEN_QUESTIONS = 50;
 var MAX_IDS_IN_ERROR = 10;
+var MAX_ARCHITECTURE_DIAGRAM_NODES = 20;
+var MAX_DIAGRAM_CLUSTERS = 6;
+var MAX_STORY_DIAGRAM_NODES = 7;
+var MAX_CHAPTER_KEY_POINTS = 5;
+var MAX_DIAGRAM_LABEL_LENGTH = 200;
+var MAX_DIAGRAM_FILE_LENGTH = 500;
+var EDGES_PER_NODE = 3;
+function collectEvidenceFiles(manifest) {
+  const files = /* @__PURE__ */ new Set();
+  const records = [
+    ...manifest.entities,
+    ...manifest.relationships,
+    ...manifest.changeUnits
+  ];
+  for (const record of records) {
+    for (const anchor of record.evidence ?? []) files.add(anchor.path);
+  }
+  return files;
+}
 function buildNarrationRequest(manifest) {
   const entities = manifest.entities.map((entity) => {
     const fact = {
@@ -7879,7 +8237,8 @@ function buildNarrationRequest(manifest) {
       id: unit.id,
       technicalTitle: unit.technicalTitle,
       commits: unit.commits ?? [],
-      entities: unit.entities ?? []
+      entities: unit.entities ?? [],
+      storyRollup: buildUnitStory(unit, manifest.entities, manifest.relationships)
     };
     if (unit.type !== void 0) fact.type = unit.type;
     if (unit.grouped !== void 0) fact.grouped = unit.grouped;
@@ -7896,7 +8255,17 @@ function buildNarrationRequest(manifest) {
     entities,
     relationships,
     changeUnits,
-    analysisLimitations: manifest.analysisLimitations.map((l) => ({ ...l }))
+    analysisLimitations: manifest.analysisLimitations.map((l) => ({ ...l })),
+    evidenceFiles: [...collectEvidenceFiles(manifest)].sort(),
+    systemRollup: buildOverviewStory(manifest.entities, manifest.relationships),
+    diagramLimits: {
+      architecture: {
+        maxNodes: MAX_ARCHITECTURE_DIAGRAM_NODES,
+        maxClusters: MAX_DIAGRAM_CLUSTERS
+      },
+      story: { maxNodes: MAX_STORY_DIAGRAM_NODES },
+      tones: [...DIAGRAM_TONES]
+    }
   };
 }
 var ENTITY_SLOTS = /* @__PURE__ */ new Set(["humanLabel"]);
@@ -7906,7 +8275,15 @@ var CHANGE_UNIT_SLOTS = /* @__PURE__ */ new Set([
   "beforeDescription",
   "afterDescription",
   "userImpact",
-  "openQuestions"
+  "openQuestions",
+  "storyDiagram"
+]);
+var RESPONSE_KEYS = /* @__PURE__ */ new Set([
+  "entities",
+  "changeUnits",
+  "architectureDiagram",
+  "projectSummary",
+  "chapters"
 ]);
 function isPlainObject2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -7915,7 +8292,181 @@ function truncatedIdList(ids) {
   const shown = ids.slice(0, MAX_IDS_IN_ERROR).join(", ");
   return ids.length > MAX_IDS_IN_ERROR ? `${shown}, \u2026 (${ids.length} total)` : shown;
 }
-function checkRecord(raw, where, slots, allowedIds, seenIds, errors) {
+function checkDiagramString(value, where, errors, maxLength = MAX_DIAGRAM_LABEL_LENGTH) {
+  if (typeof value !== "string" || value.length === 0) {
+    errors.push(`${where} must be a non-empty string`);
+  } else if (value.length > maxLength) {
+    errors.push(`${where} is ${value.length} chars \u2014 cap is ${maxLength}`);
+  }
+}
+var DIAGRAM_KEYS = /* @__PURE__ */ new Set(["clusters", "nodes", "edges"]);
+var CLUSTER_KEYS = /* @__PURE__ */ new Set(["id", "title", "tone"]);
+var NODE_KEYS = /* @__PURE__ */ new Set(["id", "cluster", "humanLabel", "role", "file"]);
+var EDGE_KEYS = /* @__PURE__ */ new Set(["from", "to", "verb"]);
+var TONE_SET = new Set(DIAGRAM_TONES);
+function checkUnknownKeys(raw, where, allowed, whatItHas, errors) {
+  for (const key of Object.keys(raw)) {
+    if (!allowed.has(key)) {
+      errors.push(
+        `${where}.${key.slice(0, 100)} is not recognised \u2014 ${whatItHas}` + (key === "provenance" ? '. Provenance is stamped by the validator; narrated diagrams are always "inferred".' : "")
+      );
+    }
+  }
+}
+function checkDiagram(raw, where, caps, evidenceFiles2, errors) {
+  const before = errors.length;
+  if (!isPlainObject2(raw)) {
+    errors.push(
+      `${where} must be a structured diagram object like {"clusters": [...], "nodes": [...], "edges": [...]} \u2014 raw Mermaid text is never accepted`
+    );
+    return null;
+  }
+  checkUnknownKeys(raw, where, DIAGRAM_KEYS, "a diagram has only clusters, nodes and edges", errors);
+  const clusterIds = /* @__PURE__ */ new Set();
+  const rawClusters = raw["clusters"] ?? [];
+  if (!Array.isArray(rawClusters)) {
+    errors.push(`${where}.clusters must be an array of {id, title, tone} objects`);
+  } else {
+    if (rawClusters.length > caps.maxClusters) {
+      errors.push(
+        `${where} declares ${rawClusters.length} clusters \u2014 cap is ${caps.maxClusters}`
+      );
+    }
+    rawClusters.forEach((cluster, index) => {
+      const at = `${where}.clusters[${index}]`;
+      if (!isPlainObject2(cluster)) {
+        errors.push(`${at} must be an object with id, title and tone`);
+        return;
+      }
+      checkUnknownKeys(cluster, at, CLUSTER_KEYS, "clusters have only id, title and tone", errors);
+      checkDiagramString(cluster["id"], `${at}.id`, errors);
+      checkDiagramString(cluster["title"], `${at}.title`, errors);
+      const tone = cluster["tone"];
+      if (typeof tone !== "string" || !TONE_SET.has(tone)) {
+        errors.push(
+          `${at}.tone must be one of: ${DIAGRAM_TONES.join(", ")} \u2014 got ${JSON.stringify(tone).slice(0, 100)}`
+        );
+      }
+      const id = cluster["id"];
+      if (typeof id === "string" && id.length > 0) {
+        if (clusterIds.has(id)) {
+          errors.push(`${at} duplicates cluster id "${id.slice(0, 100)}"`);
+        } else {
+          clusterIds.add(id);
+        }
+      }
+    });
+  }
+  const nodeIds = /* @__PURE__ */ new Set();
+  const rawNodes = raw["nodes"];
+  if (!Array.isArray(rawNodes) || rawNodes.length === 0) {
+    errors.push(`${where}.nodes must be a non-empty array of {id, humanLabel, role} objects`);
+  } else {
+    if (rawNodes.length > caps.maxNodes) {
+      errors.push(`${where} has ${rawNodes.length} nodes \u2014 cap is ${caps.maxNodes}`);
+    }
+    rawNodes.forEach((node, index) => {
+      const at = `${where}.nodes[${index}]`;
+      if (!isPlainObject2(node)) {
+        errors.push(`${at} must be an object with id, humanLabel and role`);
+        return;
+      }
+      checkUnknownKeys(
+        node,
+        at,
+        NODE_KEYS,
+        "nodes have only id, cluster, humanLabel, role and file",
+        errors
+      );
+      checkDiagramString(node["id"], `${at}.id`, errors);
+      checkDiagramString(node["humanLabel"], `${at}.humanLabel`, errors);
+      checkDiagramString(node["role"], `${at}.role`, errors);
+      const id = node["id"];
+      if (typeof id === "string" && id.length > 0) {
+        if (nodeIds.has(id)) {
+          errors.push(`${at} duplicates node id "${id.slice(0, 100)}"`);
+        } else {
+          nodeIds.add(id);
+        }
+      }
+      const cluster = node["cluster"];
+      if (cluster !== void 0) {
+        if (typeof cluster !== "string" || !clusterIds.has(cluster)) {
+          errors.push(
+            `${at}.cluster references undeclared cluster ${JSON.stringify(cluster).slice(0, 100)} \u2014 declare it in ${where}.clusters first`
+          );
+        }
+      }
+      const file = node["file"];
+      if (file !== void 0) {
+        if (typeof file !== "string" || file.length === 0 || file.length > MAX_DIAGRAM_FILE_LENGTH) {
+          errors.push(
+            `${at}.file must be a repo-relative path string (\u2264 ${MAX_DIAGRAM_FILE_LENGTH} chars)`
+          );
+        } else if (!evidenceFiles2.has(file)) {
+          errors.push(
+            `${at}.file "${file.slice(0, 200)}" is not an evidence file in this manifest \u2014 pick a path from the request's evidenceFiles list or omit "file"`
+          );
+        }
+      }
+    });
+  }
+  const rawEdges = raw["edges"] ?? [];
+  if (!Array.isArray(rawEdges)) {
+    errors.push(`${where}.edges must be an array of {from, to, verb} objects`);
+  } else {
+    const edgeCap = caps.maxNodes * EDGES_PER_NODE;
+    if (rawEdges.length > edgeCap) {
+      errors.push(`${where} has ${rawEdges.length} edges \u2014 cap is ${edgeCap}`);
+    }
+    rawEdges.forEach((edge, index) => {
+      const at = `${where}.edges[${index}]`;
+      if (!isPlainObject2(edge)) {
+        errors.push(`${at} must be an object with from, to and verb`);
+        return;
+      }
+      checkUnknownKeys(edge, at, EDGE_KEYS, "edges have only from, to and verb", errors);
+      checkDiagramString(edge["verb"], `${at}.verb`, errors);
+      for (const end of ["from", "to"]) {
+        const ref = edge[end];
+        if (typeof ref !== "string" || !nodeIds.has(ref)) {
+          errors.push(
+            `${at}.${end} references undeclared node ${JSON.stringify(ref).slice(0, 100)} \u2014 edges may only connect declared nodes`
+          );
+        }
+      }
+    });
+  }
+  if (errors.length !== before) return null;
+  const clusters = rawClusters.map(
+    (cluster) => ({
+      id: cluster["id"],
+      title: cluster["title"],
+      tone: cluster["tone"]
+    })
+  );
+  const nodes = rawNodes.map((node) => {
+    const clean = {
+      id: node["id"],
+      humanLabel: node["humanLabel"],
+      role: node["role"]
+    };
+    if (node["cluster"] !== void 0) clean.cluster = node["cluster"];
+    if (node["file"] !== void 0) clean.file = node["file"];
+    return clean;
+  });
+  const edges = rawEdges.map(
+    (edge) => ({
+      from: edge["from"],
+      to: edge["to"],
+      verb: edge["verb"]
+    })
+  );
+  const diagram = { nodes, edges };
+  if (clusters.length > 0) diagram.clusters = clusters;
+  return diagram;
+}
+function checkRecord(raw, where, slots, allowedIds, seenIds, errors, diagramContext) {
   if (!isPlainObject2(raw)) {
     errors.push(`${where} must be an object with an "id" and narration fields`);
     return null;
@@ -7946,6 +8497,23 @@ function checkRecord(raw, where, slots, allowedIds, seenIds, errors) {
       errors.push(
         `${where} sets "${key}", which narration may not touch \u2014 allowed fields: id, confidence, ${[...slots].join(", ")}` + (key === "provenance" ? '. Provenance is stamped by the validator; narration is always "inferred".' : "")
       );
+      continue;
+    }
+    if (key === "storyDiagram") {
+      if (diagramContext === void 0) {
+        errors.push(`${where}.storyDiagram is not accepted here`);
+        continue;
+      }
+      const diagram = checkDiagram(
+        value,
+        `${where}.storyDiagram`,
+        { maxNodes: MAX_STORY_DIAGRAM_NODES, maxClusters: MAX_DIAGRAM_CLUSTERS },
+        diagramContext.evidenceFiles,
+        errors
+      );
+      if (diagram === null) continue;
+      diagramContext.sanitized.set(raw, diagram);
+      hasSlot = true;
       continue;
     }
     if (key === "openQuestions") {
@@ -7992,9 +8560,9 @@ function applyNarration(manifest, response) {
     };
   }
   for (const key of Object.keys(response)) {
-    if (key !== "entities" && key !== "changeUnits") {
+    if (!RESPONSE_KEYS.has(key)) {
       errors.push(
-        `response.${key} is not recognised \u2014 only "entities" and "changeUnits" are accepted`
+        `response.${key.slice(0, 100)} is not recognised \u2014 accepted keys: ${[...RESPONSE_KEYS].join(", ")}`
       );
     }
   }
@@ -8002,6 +8570,10 @@ function applyNarration(manifest, response) {
   const unitIds = new Set(manifest.changeUnits.map((u) => u.id));
   const validEntities = [];
   const validUnits = [];
+  const diagramContext = {
+    evidenceFiles: collectEvidenceFiles(manifest),
+    sanitized: /* @__PURE__ */ new Map()
+  };
   const rawEntities = response["entities"] ?? [];
   if (!Array.isArray(rawEntities)) {
     errors.push("response.entities must be an array");
@@ -8031,10 +8603,85 @@ function applyNarration(manifest, response) {
         CHANGE_UNIT_SLOTS,
         unitIds,
         seen,
-        errors
+        errors,
+        diagramContext
       );
       if (record !== null) validUnits.push(record);
     });
+  }
+  let architectureDiagram = null;
+  if (response["architectureDiagram"] !== void 0) {
+    architectureDiagram = checkDiagram(
+      response["architectureDiagram"],
+      "architectureDiagram",
+      { maxNodes: MAX_ARCHITECTURE_DIAGRAM_NODES, maxClusters: MAX_DIAGRAM_CLUSTERS },
+      diagramContext.evidenceFiles,
+      errors
+    );
+  }
+  let projectSummary = null;
+  const rawProjectSummary = response["projectSummary"];
+  if (rawProjectSummary !== void 0) {
+    if (typeof rawProjectSummary !== "string" || rawProjectSummary.length === 0) {
+      errors.push("projectSummary must be a non-empty string");
+    } else if (rawProjectSummary.length > MAX_NARRATION_LENGTH) {
+      errors.push(
+        `projectSummary is ${rawProjectSummary.length} chars \u2014 cap is ${MAX_NARRATION_LENGTH}`
+      );
+    } else {
+      projectSummary = rawProjectSummary;
+    }
+  }
+  const chapterNarrations = /* @__PURE__ */ new Map();
+  const rawChapters = response["chapters"];
+  if (rawChapters !== void 0) {
+    if (!isPlainObject2(rawChapters)) {
+      errors.push(
+        'response.chapters must be an object keyed by chapter id, e.g. {"purpose": {"summary": "\u2026"}}'
+      );
+    } else {
+      const narratable = new Set(NARRATED_CHAPTER_IDS);
+      for (const [chapterId, rawChapter] of Object.entries(rawChapters)) {
+        const at = `chapters.${chapterId.slice(0, 50)}`;
+        if (!narratable.has(chapterId)) {
+          errors.push(
+            `${at} is not a narratable chapter \u2014 narratable chapters: ${NARRATED_CHAPTER_IDS.join(", ")}`
+          );
+          continue;
+        }
+        if (!isPlainObject2(rawChapter)) {
+          errors.push(`${at} must be an object with a "summary" and optional "keyPoints"`);
+          continue;
+        }
+        const before = errors.length;
+        for (const key of Object.keys(rawChapter)) {
+          if (key !== "summary" && key !== "keyPoints") {
+            errors.push(
+              `${at}.${key.slice(0, 100)} is not recognised \u2014 chapter narration has only summary and keyPoints` + (key === "provenance" ? '. Provenance is stamped by the validator; narration is always "inferred".' : "")
+            );
+          }
+        }
+        const summary = rawChapter["summary"];
+        if (typeof summary !== "string" || summary.length === 0) {
+          errors.push(`${at}.summary must be a non-empty string`);
+        } else if (summary.length > MAX_NARRATION_LENGTH) {
+          errors.push(`${at}.summary is ${summary.length} chars \u2014 cap is ${MAX_NARRATION_LENGTH}`);
+        }
+        const keyPoints = rawChapter["keyPoints"];
+        if (keyPoints !== void 0 && (!Array.isArray(keyPoints) || keyPoints.length > MAX_CHAPTER_KEY_POINTS || !keyPoints.every(
+          (p) => typeof p === "string" && p.length > 0 && p.length <= MAX_NARRATION_LENGTH
+        ))) {
+          errors.push(
+            `${at}.keyPoints must be an array of at most ${MAX_CHAPTER_KEY_POINTS} non-empty strings (each \u2264 ${MAX_NARRATION_LENGTH} chars)`
+          );
+        }
+        if (errors.length === before) {
+          const proposal = { summary };
+          if (keyPoints !== void 0) proposal.keyPoints = [...keyPoints];
+          chapterNarrations.set(chapterId, proposal);
+        }
+      }
+    }
   }
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -8054,13 +8701,36 @@ function applyNarration(manifest, response) {
     for (const slot of CHANGE_UNIT_SLOTS) {
       const value = record[slot];
       if (value === void 0) continue;
-      if (slot === "openQuestions") {
+      if (slot === "storyDiagram") {
+        const diagram = diagramContext.sanitized.get(record);
+        if (diagram !== void 0) {
+          unit.storyDiagram = { ...diagram, provenance: "inferred" };
+        }
+      } else if (slot === "openQuestions") {
         unit.openQuestions = value;
       } else {
         unit[slot] = value;
       }
     }
     stampInferred(unit, record["confidence"]);
+  }
+  if (architectureDiagram !== null) {
+    merged.architectureDiagram = { ...architectureDiagram, provenance: "inferred" };
+  }
+  if (projectSummary !== null) {
+    merged.projectNarration = { summary: projectSummary, provenance: "inferred" };
+  }
+  if (chapterNarrations.size > 0) {
+    const target = merged.chapterNarrations ?? {};
+    for (const [chapterId, proposal] of chapterNarrations) {
+      const narration = {
+        summary: proposal.summary,
+        provenance: "inferred"
+      };
+      if (proposal.keyPoints !== void 0) narration.keyPoints = proposal.keyPoints;
+      target[chapterId] = narration;
+    }
+    merged.chapterNarrations = target;
   }
   return { ok: true, value: merged };
 }
@@ -8110,6 +8780,19 @@ function escHtml(value) {
 }
 function escAttr(value) {
   return escHtml(value);
+}
+function safeUrl(value, allowedOrigins = []) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol === "https:") return url.href;
+  if (url.protocol === "http:" && allowedOrigins.includes(url.origin)) {
+    return url.href;
+  }
+  return null;
 }
 
 // packages/renderer/src/layout.ts
@@ -8394,6 +9077,166 @@ function compileDiagram(request) {
   return changeDiagram(request.entities, request.relationships, request.changeUnit);
 }
 
+// packages/renderer/src/mermaid.ts
+var MERMAID_TONE_CLASSDEFS = {
+  neutral: "fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a",
+  blue: "fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554",
+  amber: "fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f",
+  mint: "fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d",
+  rose: "fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337",
+  violet: "fill:#ede9fe,stroke:#7c3aed,stroke-width:1.5px,color:#2e1065"
+};
+var TONE_ORDER = [
+  "neutral",
+  "blue",
+  "amber",
+  "mint",
+  "rose",
+  "violet"
+];
+var TONE_CLASS_NAMES = {
+  neutral: "toneNeutral",
+  blue: "toneBlue",
+  amber: "toneAmber",
+  mint: "toneMint",
+  rose: "toneRose",
+  violet: "toneViolet"
+};
+function escLabel(value) {
+  return value.replace(/#/g, "#35;").replace(/"/g, "#quot;").replace(/</g, "#lt;").replace(/>/g, "#gt;").replace(/&/g, "#amp;").replace(/[|\\]/g, " ").replace(/\s+/g, " ").trim();
+}
+function clickUrl(file, options) {
+  const { linkBase, allowedOrigins = [], existingFiles } = options;
+  if (linkBase === void 0 || existingFiles === void 0) return null;
+  if (!existingFiles.has(file)) return null;
+  const safeBase = safeUrl(linkBase, allowedOrigins);
+  if (safeBase === null) return null;
+  const encoded = file.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+  const url = safeUrl(
+    `${safeBase.replace(/\/+$/, "")}/${encoded}`,
+    allowedOrigins
+  );
+  if (url === null) return null;
+  if (new URL(url).origin !== new URL(safeBase).origin) return null;
+  if (/["\s<>\\]/.test(url)) return null;
+  return url;
+}
+function nodeLine(node) {
+  return `${node.id}["${node.labelLines.join("<br/>")}"]`;
+}
+function emit(clusters, nodes, edges) {
+  const byId2 = new Map(nodes.map((n) => [n.id, n]));
+  const clustered = new Set(clusters.flatMap((c) => c.nodeIds));
+  const lines = ["flowchart TD", ""];
+  for (const cluster of clusters) {
+    if (cluster.nodeIds.length === 0) continue;
+    lines.push(`subgraph ${cluster.id}["${cluster.title}"]`);
+    for (const id of cluster.nodeIds) lines.push(`  ${nodeLine(byId2.get(id))}`);
+    lines.push("end", "");
+  }
+  const loose = nodes.filter((n) => !clustered.has(n.id));
+  if (loose.length > 0) {
+    for (const node of loose) lines.push(nodeLine(node));
+    lines.push("");
+  }
+  if (edges.length > 0) {
+    for (const edge of edges) {
+      lines.push(`${edge.from} -->|"${edge.verb}"| ${edge.to}`);
+    }
+    lines.push("");
+  }
+  const clicks = nodes.filter((n) => n.click !== void 0);
+  if (clicks.length > 0) {
+    for (const node of clicks) lines.push(`click ${node.id} "${node.click}" _blank`);
+    lines.push("");
+  }
+  const usedTones = new Set(nodes.map((n) => n.tone));
+  for (const tone of TONE_ORDER) {
+    if (!usedTones.has(tone)) continue;
+    lines.push(`classDef ${TONE_CLASS_NAMES[tone]} ${MERMAID_TONE_CLASSDEFS[tone]}`);
+  }
+  for (const tone of TONE_ORDER) {
+    const members = nodes.filter((n) => n.tone === tone).map((n) => n.id);
+    if (members.length === 0) continue;
+    lines.push(`class ${members.join(",")} ${TONE_CLASS_NAMES[tone]}`);
+  }
+  return lines.join("\n") + "\n";
+}
+function conceptDiagramToMermaid(diagram, options = {}) {
+  const clusterTone = /* @__PURE__ */ new Map();
+  const clusterId = /* @__PURE__ */ new Map();
+  const clusters = (diagram.clusters ?? []).map((cluster, i) => {
+    clusterTone.set(cluster.id, cluster.tone);
+    clusterId.set(cluster.id, `c${i}`);
+    return { id: `c${i}`, title: escLabel(cluster.title), nodeIds: [] };
+  });
+  const clustersById = new Map(
+    clusters.map((cluster) => [cluster.id, cluster])
+  );
+  const nodeId = /* @__PURE__ */ new Map();
+  const nodes = diagram.nodes.map((node, i) => {
+    const id = `n${i}`;
+    nodeId.set(node.id, id);
+    const labelLines = [escLabel(node.humanLabel), escLabel(node.role)];
+    if (node.file !== void 0) labelLines.push(`[${escLabel(node.file)}]`);
+    const memberOf = node.cluster !== void 0 ? clusterId.get(node.cluster) : void 0;
+    if (memberOf !== void 0) clustersById.get(memberOf).nodeIds.push(id);
+    const tone = node.cluster !== void 0 ? clusterTone.get(node.cluster) ?? "neutral" : "neutral";
+    const click = node.file !== void 0 ? clickUrl(node.file, options) : null;
+    return { id, labelLines, tone, ...click !== null ? { click } : {} };
+  });
+  const edges = [];
+  for (const edge of diagram.edges) {
+    const from = nodeId.get(edge.from);
+    const to = nodeId.get(edge.to);
+    if (from === void 0 || to === void 0) continue;
+    edges.push({ from, to, verb: escLabel(edge.verb) });
+  }
+  return emit(clusters, nodes, edges);
+}
+var STATE_WORDS = {
+  added: "new",
+  changed: "updated",
+  removed: "removed"
+};
+var STATE_TONES = {
+  added: "mint",
+  changed: "blue",
+  removed: "rose"
+};
+function storyRole(node) {
+  const count = `${node.count} change${node.count === 1 ? "" : "s"}`;
+  if (node.kind === "system" || node.kind === "component") {
+    const word = STATE_WORDS[node.changeState];
+    return word !== void 0 ? `${word} \xB7 ${count}` : count;
+  }
+  return count;
+}
+function storyProjectionToMermaid(projection) {
+  if (projection.nodes.length === 0) return null;
+  const kept = projection.nodes.slice(0, MAX_STORY_NODES);
+  const nodeId = /* @__PURE__ */ new Map();
+  const nodes = kept.map((node, i) => {
+    const id = `n${i}`;
+    nodeId.set(node.id, id);
+    const isContainer2 = node.kind === "system" || node.kind === "component";
+    const tone = isContainer2 ? STATE_TONES[node.changeState] ?? "neutral" : "neutral";
+    return {
+      id,
+      labelLines: [escLabel(node.humanLabel), escLabel(storyRole(node))],
+      tone
+    };
+  });
+  const edges = [];
+  for (const edge of projection.edges) {
+    const from = nodeId.get(edge.from);
+    const to = nodeId.get(edge.to);
+    if (from === void 0 || to === void 0) continue;
+    edges.push({ from, to, verb: escLabel(edge.verb) });
+  }
+  return emit([], nodes, edges);
+}
+
 // packages/renderer/src/sidebar.ts
 var sidebarCss = [
   /* --- sidebar (sb-) — sticky left column, collapses under 736px --- */
@@ -8526,7 +9369,14 @@ var commitPageCss = `
 .cp-not-narrated{color:#9ca3af}
 .cp-diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;overflow-x:auto}
 .cp-diagram svg{display:block;max-width:100%;height:auto}
+.cp-diagram figcaption{margin:0.75rem 0 0;font-size:0.8125rem;color:#6b7280}
 .cp-no-diagram{display:flex;align-items:center;justify-content:center;min-height:6rem;margin:0;color:#6b7280;background:#f9fafb;border-radius:4px}
+.cp-source{margin:0.75rem 0 0}
+.cp-source>summary{cursor:pointer;color:#6b7280;font-size:0.8125rem}
+.cp-source pre{margin:0.5rem 0 0;padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;overflow-x:auto;font-size:0.75rem;line-height:1.5}
+.cp-source code{font-family:${MONO};background:transparent;border:none;padding:0}
+.cp-ev-figure{margin:0.75rem 0;padding:0.5rem;border:1px solid #e5e7eb;border-radius:6px;background:#ffffff;overflow-x:auto}
+.cp-ev-figure svg{display:block;max-width:100%;height:auto}
 .cp-unchanged,.cp-evidence{margin:1rem 0;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem 1rem}
 .cp-unchanged>summary,.cp-evidence>summary{cursor:pointer;color:#6b7280;font-size:0.875rem;overflow-wrap:anywhere}
 .cp-unchanged p{margin:0.5rem 0;font-size:0.875rem;color:#6b7280}
@@ -8551,9 +9401,11 @@ function beforeAfterRow(slot, label, text) {
   const body = text === null ? `<span class="cp-not-narrated">Not narrated yet.</span>` : escHtml(text);
   return `<div class="cp-row cp-row-${slot}"><dt>${label}</dt><dd>${body}</dd></div>`;
 }
-function diagramFigure(diagramSvg) {
+function diagramFigure(diagramSvg, extras) {
   const body = diagramSvg ?? `<p class="cp-no-diagram">No diagram for this change.</p>`;
-  return `<figure class="cp-diagram">${body}</figure>`;
+  const source = extras.sourceText == null ? "" : `<details class="cp-source"><summary>Diagram source</summary><pre><code>${escHtml(extras.sourceText)}</code></pre></details>`;
+  const note = extras.fallbackNote == null ? "" : `<figcaption>${escHtml(extras.fallbackNote)}</figcaption>`;
+  return `<figure class="cp-diagram">${body}${source}${note}</figure>`;
 }
 function unchangedFold(count) {
   if (count === 0) return "";
@@ -8570,20 +9422,21 @@ function anchorLine(anchor) {
   }
   return `<li>${DERIVED_MARK} <code>${text}</code></li>`;
 }
-function evidenceFold(unit) {
+function evidenceFold(unit, extras) {
   const commits = (unit.unit.commits ?? []).map(
     (sha) => `<li>${DERIVED_MARK} Commit <code title="${escAttr(sha)}">${escHtml(sha.slice(0, 7))}</code></li>`
   );
   const anchors = (unit.unit.evidence ?? []).map(anchorLine);
   const lines = [...commits, ...anchors];
   const list = lines.length === 0 ? `<p class="cp-ev-empty">No recorded evidence for this change.</p>` : `<ul class="cp-ev-list">${lines.join("")}</ul>`;
-  return `<details class="cp-evidence"><summary>Technical evidence</summary><p class="cp-ev-title">${DERIVED_MARK} <code>${escHtml(unit.unit.technicalTitle)}</code></p>` + list + `</details>`;
+  const graph = extras.evidenceSvg == null ? "" : `<figure class="cp-ev-figure">${extras.evidenceSvg}</figure>`;
+  return `<details class="cp-evidence"><summary>Technical evidence</summary><p class="cp-ev-title">${DERIVED_MARK} <code>${escHtml(unit.unit.technicalTitle)}</code></p>` + graph + list + `</details>`;
 }
-function renderCommitPage(unit, diagramSvg) {
+function renderCommitPage(unit, diagramSvg, extras = {}) {
   const anchorId = escAttr(unit.anchorId);
   const mark = unit.titleInferred ? ` ${INFERRED_MARK2}` : "";
   const purpose = unit.purpose ? `<p class="cp-purpose">${escHtml(unit.purpose)}</p>` : "";
-  return `<section class="cp-page" id="${anchorId}" aria-labelledby="${anchorId}-title">` + metaRow(unit) + `<h2 class="cp-title" id="${anchorId}-title">${escHtml(unit.title)}${mark}</h2>` + purpose + `<dl class="cp-beforeafter">` + beforeAfterRow("before", "Before", unit.before) + beforeAfterRow("after", "After", unit.after) + `</dl>` + diagramFigure(diagramSvg) + unchangedFold(unit.unchangedCount) + `<p class="cp-back"><a class="cp-back-link" href="#">\u2190 All changes</a></p>` + evidenceFold(unit) + `</section>`;
+  return `<section class="cp-page" id="${anchorId}" aria-labelledby="${anchorId}-title">` + metaRow(unit) + `<h2 class="cp-title" id="${anchorId}-title">${escHtml(unit.title)}${mark}</h2>` + purpose + `<dl class="cp-beforeafter">` + beforeAfterRow("before", "Before", unit.before) + beforeAfterRow("after", "After", unit.after) + `</dl>` + diagramFigure(diagramSvg, extras) + unchangedFold(unit.unchangedCount) + `<p class="cp-back"><a class="cp-back-link" href="#">\u2190 All changes</a></p>` + evidenceFold(unit, extras) + `</section>`;
 }
 
 // packages/renderer/src/dashboardTypes.ts
@@ -8699,17 +9552,103 @@ function anchorLine2(anchor) {
   }
   return `<li>${DERIVED_MARK2} <code>${text}</code></li>`;
 }
-function evidenceDetails(anchors) {
-  if (anchors.length === 0) return "";
-  return `<details><summary>Technical evidence</summary><ul class="evidence">${anchors.map(anchorLine2).join("")}</ul></details>`;
+var MERMAID_FALLBACK_NOTE = "Rendered with the built-in diagram engine \u2014 Mermaid was unavailable at build time.";
+function evidenceFiles(change) {
+  const files = /* @__PURE__ */ new Set();
+  const collect = (anchors) => {
+    for (const anchor of anchors ?? []) files.add(anchor.path);
+  };
+  for (const entity of change.entities) collect(entity.evidence);
+  for (const rel of change.relationships) collect(rel.evidence);
+  for (const unit of change.changeUnits) collect(unit.evidence);
+  return files;
 }
-function diagramFigure2(request, renderDiagram, caption) {
-  const svg = renderDiagram ? renderDiagram(request) : null;
+function compileOptions(change, mermaid) {
+  return {
+    ...mermaid?.linkBase !== void 0 ? { linkBase: mermaid.linkBase } : {},
+    ...mermaid?.allowedOrigins !== void 0 ? { allowedOrigins: mermaid.allowedOrigins } : {},
+    existingFiles: evidenceFiles(change)
+  };
+}
+function architectureMermaidSource(book, change, mermaid) {
+  const chapter = book.chapters.find((c) => c.id === "systems");
+  if (chapter === void 0 || chapter.status === "not-written") return null;
+  if (change.architectureDiagram !== void 0) {
+    return conceptDiagramToMermaid(
+      change.architectureDiagram,
+      compileOptions(change, mermaid)
+    );
+  }
+  return storyProjectionToMermaid(
+    buildOverviewStory(change.entities, change.relationships)
+  );
+}
+function unitMermaidSource(unit, change, mermaid) {
+  if (unit.storyDiagram !== void 0) {
+    return conceptDiagramToMermaid(unit.storyDiagram, compileOptions(change, mermaid));
+  }
+  return storyProjectionToMermaid(
+    buildUnitStory(unit, change.entities, change.relationships)
+  );
+}
+function prerenderedSvg(slotId, sourceText, mermaid) {
+  if (sourceText === null) return null;
+  const entry = mermaid?.svgs?.get(slotId);
+  if (entry === void 0 || entry.text !== sourceText) return null;
+  return entry.svg;
+}
+function storyFallbackSvg(projection, kind) {
+  if (projection.nodes.length === 0) return null;
+  const entities = projection.nodes.map((node) => ({
+    id: node.id,
+    kind: node.kind === "system" ? "system" : "component",
+    humanLabel: node.humanLabel,
+    technicalLabel: `${node.count} change${node.count === 1 ? "" : "s"}`,
+    baseState: "unchanged",
+    headState: node.changeState,
+    provenance: "derived"
+  }));
+  const relationships = projection.edges.map((edge, index) => ({
+    id: `story-edge-${index}`,
+    from: edge.from,
+    to: edge.to,
+    verb: edge.verb,
+    baseState: "unchanged",
+    headState: "unchanged",
+    provenance: "derived"
+  }));
+  return kind === "context" ? contextDiagram(entities, relationships) : changeDiagram(entities, relationships);
+}
+function conceptFallbackSvg(diagram, kind) {
+  if (diagram.nodes.length === 0) return null;
+  const entities = diagram.nodes.map((node) => ({
+    id: node.id,
+    kind: "component",
+    humanLabel: node.humanLabel,
+    technicalLabel: node.role,
+    baseState: "unchanged",
+    headState: "unchanged",
+    provenance: diagram.provenance
+  }));
+  const relationships = diagram.edges.map((edge, index) => ({
+    id: `concept-edge-${index}`,
+    from: edge.from,
+    to: edge.to,
+    verb: edge.verb,
+    baseState: "unchanged",
+    headState: "unchanged",
+    provenance: diagram.provenance
+  }));
+  return kind === "context" ? contextDiagram(entities, relationships) : changeDiagram(entities, relationships);
+}
+function heroFigure(svg, sourceText, mermaidRendered, caption) {
   const captionHtml = caption === "" ? "" : `<p class="caption">${escHtml(caption)}</p>`;
   if (svg === null) {
     return captionHtml + `<figure class="diagram diagram-placeholder"><p class="muted">Diagram not yet available.</p></figure>`;
   }
-  return captionHtml + `<figure class="diagram">${svg}</figure>`;
+  const source = sourceText === null ? "" : `<details class="diagram-source"><summary>Diagram source</summary><pre><code>${escHtml(sourceText)}</code></pre></details>`;
+  const note = mermaidRendered ? "" : `<figcaption class="diagram-note">${escHtml(MERMAID_FALLBACK_NOTE)}</figcaption>`;
+  return captionHtml + `<figure class="diagram">${svg}${source}${note}</figure>`;
 }
 function timeline(units) {
   const meaningful = units.filter((unit) => !unit.grouped);
@@ -8779,8 +9718,19 @@ function commitPageSection(unit, index, change, options) {
   const relationships = unit.relationships !== void 0 ? change.relationships.filter((rel) => relationshipIds.has(rel.id)) : change.relationships.filter(
     (rel) => entityIds.has(rel.from) && entityIds.has(rel.to)
   );
-  const svg = options.renderDiagram ? options.renderDiagram({ kind: "change", entities, relationships, changeUnit: unit }) : null;
-  return renderCommitPage(toCommitPageModel(unit, index, change), svg);
+  const evidenceSvg = options.renderDiagram ? options.renderDiagram({ kind: "change", entities, relationships, changeUnit: unit }) : null;
+  const sourceText = unitMermaidSource(unit, change, options.mermaid);
+  const mermaidSvg = prerenderedSvg(unitAnchorId(index), sourceText, options.mermaid);
+  const fallbackSvg = mermaidSvg !== null || sourceText === null ? null : unit.storyDiagram !== void 0 ? conceptFallbackSvg(unit.storyDiagram, "change") : storyFallbackSvg(
+    buildUnitStory(unit, change.entities, change.relationships),
+    "change"
+  );
+  const heroSvg = mermaidSvg ?? fallbackSvg;
+  return renderCommitPage(toCommitPageModel(unit, index, change), heroSvg, {
+    sourceText,
+    fallbackNote: fallbackSvg !== null ? MERMAID_FALLBACK_NOTE : null,
+    evidenceSvg
+  });
 }
 function overviewView(book, change, meaningful) {
   const count = meaningful.length;
@@ -8797,15 +9747,28 @@ function architectureView(book, change, options) {
   if (chapter === void 0 || chapter.status === "not-written") {
     return head + `<p class="muted">Not yet written.</p>`;
   }
-  return head + diagramFigure2(
-    {
-      kind: "context",
-      entities: change.entities,
-      relationships: change.relationships
-    },
-    options.renderDiagram,
+  const narration = change.chapterNarrations?.systems;
+  const lede = narration === void 0 ? "" : `<p>${INFERRED_MARK3} ${escHtml(narration.summary)}</p>`;
+  const sourceText = architectureMermaidSource(book, change, options.mermaid);
+  const mermaidSvg = prerenderedSvg("architecture", sourceText, options.mermaid);
+  const fallbackSvg = mermaidSvg !== null || sourceText === null ? null : change.architectureDiagram !== void 0 ? conceptFallbackSvg(change.architectureDiagram, "context") : storyFallbackSvg(
+    buildOverviewStory(change.entities, change.relationships),
+    "context"
+  );
+  const hero = heroFigure(
+    mermaidSvg ?? fallbackSvg,
+    sourceText,
+    mermaidSvg !== null,
     "The systems this change touches, at a glance."
-  ) + entityList(change.entities) + relationshipList(change) + evidenceDetails(change.entities.flatMap((entity) => entity.evidence ?? []));
+  );
+  const fullGraph = options.renderDiagram ? options.renderDiagram({
+    kind: "context",
+    entities: change.entities,
+    relationships: change.relationships
+  }) : null;
+  const anchors = change.entities.flatMap((entity) => entity.evidence ?? []);
+  const evidence = `<details><summary>Technical evidence</summary>` + (fullGraph === null ? "" : `<figure class="diagram">${fullGraph}</figure>`) + entityList(change.entities) + relationshipList(change) + (anchors.length === 0 ? "" : `<ul class="evidence">${anchors.map(anchorLine2).join("")}</ul>`) + `</details>`;
+  return head + lede + hero + evidence;
 }
 function howItWorksView(change) {
   const head = viewHead("How it works", escHtml(CHAPTER_QUESTIONS.flows));
@@ -8898,6 +9861,12 @@ function shellCss() {
     `figure.diagram{margin:1.5rem 0;padding:1rem;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;overflow-x:auto}`,
     `figure.diagram svg{display:block;max-width:100%;height:auto}`,
     `figure.diagram-placeholder{display:flex;align-items:center;justify-content:center;min-height:8rem;background:#f9fafb}`,
+    // Honest fallback note + collapsed mermaid source under each diagram.
+    `figure.diagram figcaption.diagram-note{margin:0.75rem 0 0;font-size:0.8125rem;color:#6b7280}`,
+    `figure.diagram details.diagram-source{margin:0.75rem 0 0;border:none;border-radius:0;padding:0}`,
+    `figure.diagram details.diagram-source summary{font-size:0.8125rem}`,
+    `figure.diagram details.diagram-source pre{margin:0.5rem 0 0;padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;overflow-x:auto;font-size:0.75rem;line-height:1.5}`,
+    `figure.diagram details.diagram-source code{background:transparent;border:none;padding:0}`,
     `.caption{margin:1.5rem 0 0.5rem;font-size:1.0625rem}`,
     // Vertical commit timeline: hairline spine, one node per change unit.
     `ol.timeline{list-style:none;margin:1rem 0 0.5rem;padding:0}`,
@@ -9162,6 +10131,47 @@ async function runBranch(options) {
     io
   });
 }
+async function runInit(options) {
+  const { repoDir, outDir, commits, io } = options;
+  const headSha = await resolveRef(repoDir, "HEAD");
+  const { stdout } = await gitRaw(repoDir, ["rev-list", "--count", headSha]);
+  const commitCount = Number(stdout.trim());
+  if (!Number.isInteger(commitCount) || commitCount < 2) {
+    throw new Error(
+      "this repository has fewer than 2 commits \u2014 gitiviz init needs at least 2 commits to build a change range. Make another commit and rerun."
+    );
+  }
+  const { stdout: firstParentOut } = await gitRaw(repoDir, [
+    "rev-list",
+    "--count",
+    "--first-parent",
+    headSha
+  ]);
+  const firstParentDepth = Number(firstParentOut.trim());
+  const span = Math.min(commits, firstParentDepth - 1);
+  const baseSha = await resolveRef(repoDir, `${headSha}~${span}`);
+  io.out(`analyzing the last ${span} commit${span === 1 ? "" : "s"} (${commitCount} in history)`);
+  await runCompare({
+    repoDir,
+    outDir,
+    baseRef: baseSha,
+    headRef: headSha,
+    ...options.repoName !== void 0 ? { repoName: options.repoName } : {},
+    io
+  });
+  io.out(
+    [
+      "",
+      "Next steps (the story loop):",
+      `  1. Read ${join(outDir, "narration-request.json")} \u2014 it lists the only entity/`,
+      "     change-unit ids you may reference, the evidenceFiles inventory diagram",
+      "     nodes must anchor to, and the diagram caps (diagramLimits).",
+      `  2. Write ${join(outDir, "narration-response.json")} with the project summary,`,
+      "     chapters, architectureDiagram, and a story per change unit.",
+      "  3. Run `gitiviz apply-narration` to validate, merge, and re-render the book."
+    ].join("\n")
+  );
+}
 async function runCommit(options) {
   const headSha = await resolveRef(options.repoDir, options.ref);
   await runCompare({
@@ -9192,16 +10202,20 @@ async function runApplyNarration(options) {
 
 // packages/cli/src/index.ts
 var USAGE = `Usage:
+  gitiviz init [--commits N]    [--repo DIR] [--out DIR] [--name NAME]
   gitiviz compare <base> <head> [--repo DIR] [--out DIR] [--name NAME]
   gitiviz branch [base]         [--repo DIR] [--out DIR] [--name NAME]
   gitiviz commit <sha>          [--repo DIR] [--out DIR] [--name NAME]
   gitiviz validate                          [--out DIR]
   gitiviz apply-narration                   [--out DIR] [--name NAME]
 
+  --commits N  init only: how many trailing commits to analyze (default: 20,
+               clamped to the available history)
   --repo DIR   git repository to analyze (default: current directory)
   --out DIR    output directory (default: <repo>/.gitiviz)
   --name NAME  repository display name (default: GITIVIZ_REPO_NAME env,
                else the origin remote's repo name, else the directory name)`;
+var DEFAULT_INIT_COMMITS = 20;
 function parseArgs(argv) {
   const parsed = { positionals: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -9216,6 +10230,12 @@ function parseArgs(argv) {
       if (token === "--repo") parsed.repo = value;
       else if (token === "--out") parsed.out = value;
       else parsed.name = value;
+    } else if (token === "--commits") {
+      const value = argv[++i];
+      if (value === void 0 || !/^\d+$/.test(value) || Number(value) < 1) {
+        throw new Error("--commits needs a positive whole number (e.g. --commits 20)");
+      }
+      parsed.commits = Number(value);
     } else if (token.startsWith("--")) {
       throw new Error(`unknown option "${token}"`);
     } else {
@@ -9252,8 +10272,23 @@ async function runCli(argv, io = defaultIo, env = process.env) {
   const outDir = resolve2(parsed.out ?? join2(repoDir, ".gitiviz"));
   const explicitName = [parsed.name, env["GITIVIZ_REPO_NAME"]].map((v) => v?.trim() ?? "").find((v) => v !== "") ?? void 0;
   const named = explicitName !== void 0 ? { repoName: explicitName } : {};
+  if (parsed.commits !== void 0 && command !== "init") {
+    io.err('gitiviz: --commits is only valid for "init"');
+    io.err(USAGE);
+    return 1;
+  }
   try {
     switch (command) {
+      case "init":
+        expectArgs("init", rest, 0, 0);
+        await runInit({
+          repoDir,
+          outDir,
+          commits: parsed.commits ?? DEFAULT_INIT_COMMITS,
+          ...named,
+          io
+        });
+        return 0;
       case "compare":
         expectArgs("compare", rest, 2, 2);
         await runCompare({
