@@ -919,19 +919,16 @@ describe("mermaid concept diagrams", () => {
     expect(html.indexOf("cp-beforeafter")).toBeLessThan(html.indexOf("cp-diagram"));
   });
 
-  it("folds a Diagram source block with the escaped mermaid text under every diagram", () => {
+  it("emits no Diagram source folds — mermaid text never ships in the page", () => {
     const change = narratedChange();
     const book = demoBook(change);
-    const doc = parse(renderChangeBook(book, change, {}));
-    const sources = Array.from(doc.querySelectorAll("details")).filter((d) =>
-      d.querySelector("summary")?.textContent?.includes("Diagram source")
-    );
-    expect(sources.length).toBe(3);
-    for (const fold of sources) expect(fold.hasAttribute("open")).toBe(false);
-    const archSource = doc.querySelector("#architecture figure.diagram details pre");
-    expect(archSource).not.toBeNull();
-    expect(archSource!.textContent).toContain("flowchart TD");
-    expect(archSource!.textContent).toContain("Shop #amp; Checkout");
+    const html = renderChangeBook(book, change, {});
+    expect(html).not.toContain("Diagram source");
+    expect(html).not.toContain("diagram-source");
+    expect(html).not.toContain("cp-source");
+    const doc = parse(html);
+    expect(doc.querySelector("figure.diagram details")).toBeNull();
+    expect(doc.querySelector("figure.cp-diagram details")).toBeNull();
   });
 
   it("ignores a prerendered SVG whose source text no longer matches", () => {

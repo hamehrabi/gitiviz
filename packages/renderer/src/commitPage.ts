@@ -70,10 +70,6 @@ export const commitPageCss = `
 .cp-diagram svg{display:block;max-width:100%;height:auto}
 .cp-diagram figcaption{margin:0.75rem 0 0;font-size:0.8125rem;color:#6b7280}
 .cp-no-diagram{display:flex;align-items:center;justify-content:center;min-height:6rem;margin:0;color:#6b7280;background:#f9fafb;border-radius:4px}
-.cp-source{margin:0.75rem 0 0}
-.cp-source>summary{cursor:pointer;color:#6b7280;font-size:0.8125rem}
-.cp-source pre{margin:0.5rem 0 0;padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;overflow-x:auto;font-size:0.75rem;line-height:1.5}
-.cp-source code{font-family:${MONO};background:transparent;border:none;padding:0}
 .cp-ev-figure{margin:0.75rem 0;padding:0.5rem;border:1px solid #e5e7eb;border-radius:6px;background:#ffffff;overflow-x:auto}
 .cp-ev-figure svg{display:block;max-width:100%;height:auto}
 .cp-unchanged,.cp-evidence{margin:1rem 0;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem 1rem}
@@ -130,8 +126,8 @@ function beforeAfterRow(
  * The diagram slot. `diagramSvg` is trusted, pre-escaped SVG markup —
  * either prerendered Mermaid or the built-in story engine — inserted
  * verbatim; null renders a quiet placeholder. The optional extras add the
- * collapsed "Diagram source" fold (escaped mermaid text) and the honest
- * fallback note, both INSIDE the figure so the page's child budget holds.
+ * honest fallback note INSIDE the figure so the page's child budget holds.
+ * The mermaid source text never ships in the page.
  */
 function diagramFigure(
   diagramSvg: string | null,
@@ -139,16 +135,11 @@ function diagramFigure(
 ): string {
   const body =
     diagramSvg ?? `<p class="cp-no-diagram">No diagram for this change.</p>`;
-  const source =
-    extras.sourceText == null
-      ? ""
-      : `<details class="cp-source"><summary>Diagram source</summary>` +
-        `<pre><code>${escHtml(extras.sourceText)}</code></pre></details>`;
   const note =
     extras.fallbackNote == null
       ? ""
       : `<figcaption>${escHtml(extras.fallbackNote)}</figcaption>`;
-  return `<figure class="cp-diagram">${body}${source}${note}</figure>`;
+  return `<figure class="cp-diagram">${body}${note}</figure>`;
 }
 
 /** Collapsed "Unchanged: N components" — omitted entirely when N is 0. */
@@ -214,8 +205,6 @@ function evidenceFold(unit: CommitPageModel, extras: CommitPageDiagramExtras): s
 
 /** Optional diagram extras for one commit page. */
 export interface CommitPageDiagramExtras {
-  /** Mermaid text for the collapsed "Diagram source" fold in the figure. */
-  sourceText?: string | null;
   /** Honest note when the hero diagram used the built-in fallback engine. */
   fallbackNote?: string | null;
   /** Full unit graph SVG — rendered ONLY inside the Technical evidence fold. */

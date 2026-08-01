@@ -406,11 +406,11 @@ function conceptFallbackSvg(
 /**
  * The hero diagram figure: prerendered Mermaid SVG when available, else
  * the built-in fallback with its honest note, else a quiet placeholder.
- * The collapsed "Diagram source" fold ships the mermaid text either way.
+ * The mermaid source text never ships in the page — diagrams carry their
+ * own provenance; the source lives in `.gitiviz/dist/diagrams/`.
  */
 function heroFigure(
   svg: string | null,
-  sourceText: string | null,
   mermaidRendered: boolean,
   caption: string
 ): string {
@@ -424,15 +424,10 @@ function heroFigure(
       `</figure>`
     );
   }
-  const source =
-    sourceText === null
-      ? ""
-      : `<details class="diagram-source"><summary>Diagram source</summary>` +
-        `<pre><code>${escHtml(sourceText)}</code></pre></details>`;
   const note = mermaidRendered
     ? ""
     : `<figcaption class="diagram-note">${escHtml(MERMAID_FALLBACK_NOTE)}</figcaption>`;
-  return captionHtml + `<figure class="diagram">${svg}${source}${note}</figure>`;
+  return captionHtml + `<figure class="diagram">${svg}${note}</figure>`;
 }
 
 /**
@@ -580,7 +575,6 @@ function commitPageSection(
           );
   const heroSvg = mermaidSvg ?? fallbackSvg;
   return renderCommitPage(toCommitPageModel(unit, index, change), heroSvg, {
-    sourceText,
     fallbackNote: fallbackSvg !== null ? MERMAID_FALLBACK_NOTE : null,
     evidenceSvg
   });
@@ -656,7 +650,6 @@ function architectureView(
           );
   const hero = heroFigure(
     mermaidSvg ?? fallbackSvg,
-    sourceText,
     mermaidSvg !== null,
     "The systems this change touches, at a glance."
   );
@@ -821,13 +814,8 @@ function shellCss(): string {
       `background:#ffffff;overflow-x:auto}`,
     `figure.diagram svg{display:block;max-width:100%;height:auto}`,
     `figure.diagram-placeholder{display:flex;align-items:center;justify-content:center;min-height:8rem;background:#f9fafb}`,
-    // Honest fallback note + collapsed mermaid source under each diagram.
+    // Honest fallback note under each diagram.
     `figure.diagram figcaption.diagram-note{margin:0.75rem 0 0;font-size:0.8125rem;color:#6b7280}`,
-    `figure.diagram details.diagram-source{margin:0.75rem 0 0;border:none;border-radius:0;padding:0}`,
-    `figure.diagram details.diagram-source summary{font-size:0.8125rem}`,
-    `figure.diagram details.diagram-source pre{margin:0.5rem 0 0;padding:0.75rem;background:#f9fafb;` +
-      `border:1px solid #e5e7eb;border-radius:6px;overflow-x:auto;font-size:0.75rem;line-height:1.5}`,
-    `figure.diagram details.diagram-source code{background:transparent;border:none;padding:0}`,
     `.caption{margin:1.5rem 0 0.5rem;font-size:1.0625rem}`,
     // Vertical commit timeline: hairline spine, one node per change unit.
     `ol.timeline{list-style:none;margin:1rem 0 0.5rem;padding:0}`,

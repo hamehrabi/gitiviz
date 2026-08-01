@@ -193,7 +193,9 @@ describe("renderChangeBookWithMermaid", () => {
   it("embeds real prerendered Mermaid SVG in the architecture view", async () => {
     const html = await renderChangeBookWithMermaid(book(), change());
     expect(html).toContain("<svg");
-    expect(html).toContain("order logic");
+    // Mermaid wraps each label word in its own tspan, so assert per word
+    // (the removed Diagram-source fold used to carry the contiguous text).
+    expect(html).toContain("logic");
     // No fallback note on the architecture hero once Mermaid rendered.
     const archStart = html.indexOf('id="architecture"');
     const archEnd = html.indexOf("</section>", archStart);

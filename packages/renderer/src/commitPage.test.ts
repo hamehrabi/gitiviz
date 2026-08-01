@@ -178,18 +178,15 @@ describe("renderCommitPage diagram", () => {
     );
   });
 
-  it("folds the escaped mermaid source inside the figure, closed by default", () => {
-    const source = 'flowchart TD\nn0["Guest checkout<br/>new order path"]';
-    const { root } = parse(
-      renderCommitPage(demoModel(), DIAGRAM_SVG, { sourceText: source })
-    );
-    const fold = root.querySelector(".cp-diagram details.cp-source");
-    expect(fold).not.toBeNull();
-    expect(fold!.hasAttribute("open")).toBe(false);
-    expect(fold!.querySelector("summary")!.textContent).toBe("Diagram source");
-    expect(fold!.querySelector("pre")!.textContent).toContain("flowchart TD");
-    // The source text is escaped, never interpreted as markup.
-    expect(root.querySelector(".cp-source br")).toBeNull();
+  it("never emits a Diagram source fold — the mermaid text stays out of the page", () => {
+    const html = renderCommitPage(demoModel(), DIAGRAM_SVG, {
+      fallbackNote: "note",
+      evidenceSvg: DIAGRAM_SVG
+    });
+    expect(html).not.toContain("Diagram source");
+    expect(html).not.toContain("cp-source");
+    const { root } = parse(html);
+    expect(root.querySelector(".cp-diagram details")).toBeNull();
   });
 
   it("shows the honest fallback note inside the figure when provided", () => {
@@ -206,7 +203,6 @@ describe("renderCommitPage diagram", () => {
   it("keeps the child budget with all extras present", () => {
     const { root } = parse(
       renderCommitPage(demoModel(), DIAGRAM_SVG, {
-        sourceText: "flowchart TD",
         fallbackNote: "note",
         evidenceSvg: DIAGRAM_SVG
       })
