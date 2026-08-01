@@ -93,6 +93,25 @@
 
   "changeUnits": [
     {
+      "id": "2de120237078",
+      "humanTitle": "The book now travels with the project",
+      "summary": "The stories and diagrams you are reading were being kept only on the machine that wrote them, so anyone else who cloned the project got the same code but a different book. The writing is now stored with the project itself, while the rebuildable pages stay out of the way.",
+      "beforeDescription": "Everything the tool produced was excluded from the project's history — including the writing. A colleague cloning the repository got a book with different words and a different architecture picture, because their assistant wrote its own from scratch.",
+      "afterDescription": "The writing travels with the project. Anyone who clones it rebuilds the same book, and improvements to the wording can be reviewed and discussed like any other contribution.",
+      "userImpact": "What you read here is what your teammates read — the book is now the project's shared account of itself, not a private one.",
+      "storyDiagram": {
+        "nodes": [
+          { "id": "story", "humanLabel": "The written stories", "role": "curated, worth keeping" },
+          { "id": "repo", "humanLabel": "The project", "role": "shared with everyone", "file": ".gitignore" },
+          { "id": "pages", "humanLabel": "The built pages", "role": "rebuilt on demand" }
+        ],
+        "edges": [
+          { "from": "story", "to": "repo", "verb": "now travels with" },
+          { "from": "repo", "to": "pages", "verb": "rebuilds" }
+        ]
+      }
+    },
+    {
       "id": "797c88f46bcd",
       "humanTitle": "The AI may propose diagrams — but cannot invent them",
       "summary": "Claude can now suggest the diagrams itself: the groups, the boxes, the arrows between them. It hands them over as plain structured data rather than as drawing instructions, and every box that names a file is checked against the real evidence. A box pointing at a file that does not exist is rejected outright, along with duplicate boxes, arrows leading nowhere, and oversized diagrams. The same change opened slots for a written project summary and the book's opening chapters.",
